@@ -1,14 +1,20 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <SDL.h>
 
-#define TARGET_IP "192.168.1.10"
+#define DEFAULT_TARGET_HOST "192.168.1.10"
 #define TARGET_PORT 4444
+
+// Resolved target address (set once at startup)
+static struct sockaddr_in target_addr;
+static const char *target_host = NULL;
 
 #define INHIBIT_SHORTCUTS 1
 
@@ -30,18 +36,39 @@ typedef struct {
     int8_t horizontal;
 } mouse_packet;
 
+int resolve_target(void)
+{
+    target_host = getenv("NETHID_IP");
+    if (target_host == NULL) {
+        target_host = DEFAULT_TARGET_HOST;
+    }
+
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%d", TARGET_PORT);
+
+    int err = getaddrinfo(target_host, port_str, &hints, &res);
+    if (err != 0) {
+        fprintf(stderr, "Failed to resolve %s: %s\n", target_host, gai_strerror(err));
+        return -1;
+    }
+
+    memcpy(&target_addr, res->ai_addr, sizeof(target_addr));
+    freeaddrinfo(res);
+
+    printf("Resolved %s to %s\n", target_host, inet_ntoa(target_addr.sin_addr));
+    return 0;
+}
+
 void send_keyboard(uint8_t pressed, uint8_t scancode)
 {
     int sockfd;
-    struct sockaddr_in servaddr;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-    bzero(&servaddr, sizeof(servaddr));
-
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = inet_addr(TARGET_IP);
-    servaddr.sin_port = htons(TARGET_PORT);
 
     keypress_packet packet;
     packet.type = 1; // 1 == keyboard
@@ -55,8 +82,8 @@ void send_keyboard(uint8_t pressed, uint8_t scancode)
             &packet,
             sizeof(packet),
             0,
-            (struct sockaddr *) &servaddr,
-            sizeof(servaddr)) < 0) {
+            (struct sockaddr *) &target_addr,
+            sizeof(target_addr)) < 0) {
         printf("Error sending packet\n");
     }
 
@@ -71,15 +98,8 @@ void send_mouse(
     int8_t horizontal)
 {
     int sockfd;
-    struct sockaddr_in servaddr;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-    bzero(&servaddr, sizeof(servaddr));
-
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = inet_addr(TARGET_IP);
-    servaddr.sin_port = htons(TARGET_PORT);
 
     mouse_packet packet;
     packet.type = 2; // 2 == mouse
@@ -95,8 +115,8 @@ void send_mouse(
             &packet,
             sizeof(packet),
             0,
-            (struct sockaddr *) &servaddr,
-            sizeof(servaddr)) < 0) {
+            (struct sockaddr *) &target_addr,
+            sizeof(target_addr)) < 0) {
         printf("Error sending packet\n");
     }
 
@@ -107,6 +127,10 @@ int main()
 {
     SDL_Window *window;
     SDL_Surface *surface;
+
+    if (resolve_target() < 0) {
+        return 1;
+    }
 
     SDL_Init(SDL_INIT_VIDEO);
 
