@@ -169,24 +169,8 @@ void move_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t vertical, int8_t hor
 // private function for sending updated usb packet
 //
 
-static void send_events()
+static void send_events(int report_id)
 {
-    // skip if hid is not ready yet
-    if (!tud_hid_ready()) {
-        return;
-    }
-
-    if (tud_suspended() &&
-            (!queue_is_empty(&fifo_keyboard) ||
-             !queue_is_empty(&fifo_mouse))) {
-        // Wake up host if we are in suspend mode
-        // and REMOTE_WAKEUP feature is enabled by host
-        tud_remote_wakeup();
-
-        return;
-    }
-
-    // send the next report in the queue
     uint8_t new_keycodes[6] = { 0, 0, 0, 0, 0, 0 };
     mouse_data new_mouse_data = { 
         .buttons = 0,
@@ -196,42 +180,33 @@ static void send_events()
         .horizontal = 0
     };
 
-    if (queue_is_empty(&fifo_keyboard) && queue_is_empty(&fifo_mouse)) {
-        return;
-    }
-
-    // printf("Removing from queue (%d)\r\n", queue_get_level(&report_fifo));
-    if (queue_try_remove(&fifo_keyboard, &new_keycodes)) {
-        // printf("Sending report: ");
-        // for (int i = 0; i < 6; i++) {
-        //     printf("%02x ", new_keycodes[i]);
-        // }
-        // printf("\r\n");
-        /*
-        tud_hid_mouse_report(
-                REPORT_ID_MOUSE,
-                0,  // buttons
-                0,  // x
-                0,  // y
-                0,  // vertical
-                0); // horizontal
-        */
-        tud_hid_keyboard_report(
-                REPORT_ID_KEYBOARD,
-                0,  // modifiers
-                new_keycodes);
-    } else if (queue_try_remove(&fifo_mouse, &new_mouse_data)) {
-        // printf("Sending mouse data: xrel: %d, yrel: %d\r\n",
-        //         new_mouse_data.x,
-        //         new_mouse_data.y);
-        // printf("\r\n");
-        tud_hid_mouse_report(
-                REPORT_ID_MOUSE,
-                new_mouse_data.buttons,
-                new_mouse_data.x,
-                new_mouse_data.y,
-                new_mouse_data.vertical,
-                new_mouse_data.horizontal);
+    if (report_id == REPORT_ID_KEYBOARD && !queue_is_empty(&fifo_keyboard)) {
+        if (queue_try_remove(&fifo_keyboard, &new_keycodes)) {
+            // printf("Sending keyboard data: ");
+            // for (int i = 0; i < 6; i++) {
+            //     printf("%02x ", new_keycodes[i]);
+            // }
+            // printf("\r\n");
+            tud_hid_keyboard_report(
+                    REPORT_ID_KEYBOARD,
+                    0,  // modifiers
+                    new_keycodes);
+        }
+    } else if (report_id == REPORT_ID_MOUSE && !queue_is_empty(&fifo_mouse)) {
+        if (queue_try_remove(&fifo_mouse, &new_mouse_data)) {
+            // printf("Sending mouse data: xrel: %d, yrel: %d\r\n",
+            //         new_mouse_data.x,
+            //         new_mouse_data.y);
+            tud_hid_mouse_report(
+                    REPORT_ID_MOUSE,
+                    new_mouse_data.buttons,
+                    new_mouse_data.x,
+                    new_mouse_data.y,
+                    new_mouse_data.vertical,
+                    new_mouse_data.horizontal);
+        }
+    } else {
+        // printf("Nothing more to send for id %d\r\n", report_id);
     }
 }
 
@@ -249,7 +224,27 @@ void hid_task(void)
 
     start_ms += interval_ms;
 
-    send_events();
+    // skip if hid is not ready yet
+    if (!tud_hid_ready()) {
+        return;
+    }
+
+    if (tud_suspended() &&
+            (!queue_is_empty(&fifo_keyboard) ||
+             !queue_is_empty(&fifo_mouse))) {
+        // Wake up host if we are in suspend mode
+        // and REMOTE_WAKEUP feature is enabled by host
+        tud_remote_wakeup();
+
+        return;
+    }
+
+    // try sending whichever we have in queue
+    if (!queue_is_empty(&fifo_keyboard)) {
+        send_events(REPORT_ID_KEYBOARD);
+    } else if (!queue_is_empty(&fifo_mouse)) {
+        send_events(REPORT_ID_MOUSE);
+    }
 }
 
 // Invoked when sent REPORT successfully to host
@@ -262,6 +257,9 @@ void tud_hid_report_complete_cb(
 {
     (void) instance;
     (void) len;
+
+    // keep sending...
+    send_events(report[0]);
 }
 
 // Invoked when received GET_REPORT control request

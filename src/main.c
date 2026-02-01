@@ -127,12 +127,15 @@ int main()
 
 int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t auth)
 {
-    printf("cyw43_arch_init_with_country()\r\n");
+    printf("cyw43_arch_init()\r\n");
     if (cyw43_arch_init()) {
         return 1;
     }
     printf("cyw43_arch_enable_sta_mode()\r\n");
     cyw43_arch_enable_sta_mode();
+
+    // Disable power save mode to prevent AP disassociation due to inactivity
+    cyw43_wifi_pm(&cyw43_state, CYW43_NO_POWERSAVE_MODE);
 
     char hostname[16];
     uint8_t mac[6];
@@ -141,7 +144,6 @@ int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t au
     netif_set_hostname(netif_default, hostname);
 
     printf("cyw43_arch_wifi_connect_async(%s, ..., ...)\r\n", ssid);
-    //if (cyw43_arch_wifi_connect_blocking(ssid, pass, auth)) {
     wifi_up = false;
     update_blink_state();
 
@@ -263,6 +265,11 @@ void wifi_task(void)
         case CYW43_LINK_DOWN:
             if (prev_result != result) {
                 printf("CYW43_LINK_DOWN\r\n");
+                // Only reconnect if we were previously connected (not on initial boot)
+                if (prev_result == CYW43_LINK_UP) {
+                    printf("Attempting to reconnect...\r\n");
+                    cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_MIXED_PSK);
+                }
             }
             break;
         case CYW43_LINK_JOIN:
@@ -287,6 +294,11 @@ void wifi_task(void)
         case CYW43_LINK_FAIL:
             if (prev_result != result) {
                 printf("CYW43_LINK_FAIL\r\n");
+                // Attempt to reconnect on failure (but not if this is the initial attempt)
+                if (prev_result >= 0) {
+                    printf("Attempting to reconnect...\r\n");
+                    cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_MIXED_PSK);
+                }
             }
             break;
         case CYW43_LINK_NONET:
