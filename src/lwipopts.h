@@ -94,4 +94,13 @@
 #define LWIP_ALTCP_TLS           1
 #define LWIP_ALTCP_TLS_MBEDTLS   1
 #define MEMP_NUM_SYS_TIMEOUT     LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1
+
+// HTTP server options
+#define LWIP_HTTPD_CGI                  0
+#define LWIP_HTTPD_SSI                  0
+#define LWIP_HTTPD_SUPPORT_POST         0
+#define LWIP_HTTPD_CUSTOM_FILES         1
+#define LWIP_HTTPD_DYNAMIC_HEADERS      1
+#define HTTPD_FSDATA_FILE               "httpd/fsdata.c"
+
 #endif

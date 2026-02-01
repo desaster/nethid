@@ -34,6 +34,7 @@
 #include "board.h"
 #include "usb.h"
 #include "config.h"
+#include "httpd/httpd.h"
 
 #define UART0_TX_PIN 16
 #define UART0_RX_PIN 17
@@ -274,6 +275,9 @@ int setup_server()
     pcb = udp_new();
     udp_bind(pcb, IP_ADDR_ANY, 4444);
     udp_recv(pcb, udp_receive, 0);
+
+    // Start HTTP server
+    nethid_httpd_init();
 
     cyw43_arch_lwip_end();
 }

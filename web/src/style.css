@@ -1,0 +1,92 @@
+:root {
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    color-scheme: light dark;
+    color: #213547;
+    background-color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        color: #e0e0e0;
+        background-color: #1a1a1a;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 1rem;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin: 0 0 1rem 0;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid #ccc;
+}
+
+@media (prefers-color-scheme: dark) {
+    th, td {
+        border-bottom-color: #444;
+    }
+}
+
+th {
+    width: 30%;
+    font-weight: 600;
+}
+
+td {
+    font-family: monospace;
+}
+
+.status-ok {
+    color: #22c55e;
+    font-weight: 600;
+}
+
+.error {
+    color: #ef4444;
+}
+
+button {
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: transparent;
+}
+
+button:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+    button {
+        border-color: #555;
+        color: inherit;
+    }
+    button:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}

@@ -33,11 +33,13 @@ add_executable(${TARGET}
     src/board.c
     src/usb.c
     src/usb_descriptors.c
+    src/httpd/httpd.c
     #${PICO_SDK_PATH}/lib/lwip/src/apps/mqtt/mqtt.c
     )
 
 target_link_libraries(${TARGET}
     pico_cyw43_arch_lwip_poll
+    pico_lwip_http
     pico_stdlib
     pico_multicore
     #pico_lwip_mqtt
