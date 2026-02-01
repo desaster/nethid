@@ -40,5 +40,7 @@ void tud_resume_cb(void);
 void press_key(uint16_t key);
 void depress_key(uint16_t key);
 void move_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t vertical, int8_t horizontal);
+void press_consumer(uint16_t code);
+void release_consumer(void);
 
 #endif

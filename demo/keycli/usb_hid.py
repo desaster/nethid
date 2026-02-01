@@ -285,3 +285,23 @@ def ascii_to_hid_scancode(c):
     if n > 127 or n < 32: return
     n -= 32; # offset ignore the first 32 symbols in ascii table
     return ascii_to_hid_key_map[n][1];
+
+# Consumer Control Codes (HID Usage Page 0x0C)
+HID_CONSUMER_PLAY_PAUSE           = 0x00CD
+HID_CONSUMER_NEXT_TRACK           = 0x00B5
+HID_CONSUMER_PREV_TRACK           = 0x00B6
+HID_CONSUMER_STOP                 = 0x00B7
+HID_CONSUMER_MUTE                 = 0x00E2
+HID_CONSUMER_VOLUME_UP            = 0x00E9
+HID_CONSUMER_VOLUME_DOWN          = 0x00EA
+HID_CONSUMER_MEDIA_SELECT         = 0x0183
+HID_CONSUMER_MAIL                 = 0x018A
+HID_CONSUMER_CALCULATOR           = 0x0192
+HID_CONSUMER_MY_COMPUTER          = 0x0194
+HID_CONSUMER_WWW_SEARCH           = 0x0221
+HID_CONSUMER_WWW_HOME             = 0x0223
+HID_CONSUMER_WWW_BACK             = 0x0224
+HID_CONSUMER_WWW_FORWARD          = 0x0225
+HID_CONSUMER_WWW_STOP             = 0x0226
+HID_CONSUMER_WWW_REFRESH          = 0x0227
+HID_CONSUMER_WWW_FAVORITES        = 0x022A

@@ -13,7 +13,12 @@
 #   HID_KEY_X down|up   Press or release a key (see usb_hid.py for key names)
 #   mouse1|mouse2 down|up   Press or release mouse button
 #   move X Y            Move mouse by X,Y pixels
+#   media NAME          Press and release a media key (e.g., media volume_up)
+#   media NAME down|up  Press or release a media key
 #   sleep N             Sleep for N seconds
+#
+# Media key names: play_pause, next_track, prev_track, stop, mute,
+#                  volume_up, volume_down, calculator, www_back, etc.
 #
 # Examples:
 #   ./keycli.py HID_KEY_A down sleep 0.1 HID_KEY_A up
@@ -44,6 +49,13 @@ def send_move(buttons, x, y, vertical, horizontal):
         print(f'send_move: {buttons}, {x}, {y}, {vertical}, {horizontal}')
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     packet = pack('BBBbbbb', 0x02, 0x01, buttons, x, y, vertical, horizontal)
+    sock.sendto(packet, (UDP_IP, UDP_PORT))
+
+def send_consumer(code, pressed):
+    if VERBOSE:
+        print(f'send_consumer: {code:#06x}, {pressed}')
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    packet = pack('<BBBH', 0x03, 0x01, pressed, code)
     sock.sendto(packet, (UDP_IP, UDP_PORT))
 
 def print_help():
@@ -108,5 +120,21 @@ if __name__ == '__main__':
             send_move(mouse_buttons(mouse_button1, mouse_button2), delta_x, delta_y, 0, 0)
         elif arg == 'sleep':
             sleep(float(args.pop(0)))
+        elif arg == 'media':
+            name = args.pop(0).upper()
+            attr = 'HID_CONSUMER_' + name
+            if not hasattr(hid, attr):
+                raise Exception('Unknown media key: {}'.format(name))
+            code = getattr(hid, attr)
+            # Check if next arg is down/up, otherwise do press+release
+            if args and args[0] in ('down', 'up'):
+                action = args.pop(0)
+                print('Sending media {} {}'.format(name.lower(), action))
+                send_consumer(code, action == 'down')
+            else:
+                print('Sending media {} (press+release)'.format(name.lower()))
+                send_consumer(code, True)
+                sleep(0.05)
+                send_consumer(code, False)
         else:
             raise Exception('Invalid argument: {}'.format(arg))

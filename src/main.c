@@ -48,6 +48,7 @@ struct udp_pcb *pcb;
 
 #define PACKET_TYPE_KEYBOARD 1
 #define PACKET_TYPE_MOUSE 2
+#define PACKET_TYPE_CONSUMER 3
 
 // header determines the second part of the packet
 typedef struct {
@@ -70,6 +71,12 @@ typedef struct {
     int8_t vertical;
     int8_t horizontal;
 } packet_mouse;
+
+// ..or consumer control (media keys)
+typedef struct {
+    uint8_t pressed;
+    uint16_t code;
+} __attribute__((packed)) packet_consumer;
 
 void led_blinking_task(void);
 void hid_task(void);
@@ -164,6 +171,7 @@ static void udp_receive(
     packet_header *hdr;
     packet_keyboard *kbd;
     packet_mouse *mou;
+    packet_consumer *con;
 
     if (p == NULL) {
         return;
@@ -216,6 +224,21 @@ static void udp_receive(
         //         mou->vertical,
         //         mou->horizontal);
         move_mouse(mou->buttons, mou->x, mou->y, mou->vertical, mou->horizontal);
+    } else if (hdr->type == PACKET_TYPE_CONSUMER) {
+        if (p->len != sizeof(packet_header) + sizeof(packet_consumer)) {
+            printf("Consumer packet too short (%d)\r\n", p->len);
+            pbuf_free(p);
+            return;
+        }
+        con = (packet_consumer *) (p->payload + sizeof(packet_header));
+        printf("Received consumer code: %04x %s\r\n",
+                con->code,
+                con->pressed ? "down" : "up");
+        if (con->pressed) {
+            press_consumer(con->code);
+        } else {
+            release_consumer();
+        }
     } else {
         printf("Unknown packet type: %d\r\n", hdr->type);
         pbuf_free(p);

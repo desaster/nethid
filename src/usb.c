@@ -39,6 +39,7 @@
 
 queue_t fifo_keyboard;
 queue_t fifo_mouse;
+queue_t fifo_consumer;
 
 uint8_t keycodes[6] = { 0, 0, 0, 0, 0, 0 };
 typedef struct {
@@ -59,6 +60,7 @@ void tud_mount_cb(void)
     // initialize a fifo queue of hid reports
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
     queue_init(&fifo_mouse, sizeof(mouse_data), 128);
+    queue_init(&fifo_consumer, sizeof(uint16_t), 32);
     usb_mounted = true;
     update_blink_state();
 }
@@ -68,6 +70,7 @@ void tud_umount_cb(void)
 {
     queue_free(&fifo_keyboard);
     queue_free(&fifo_mouse);
+    queue_free(&fifo_consumer);
     usb_mounted = false;
     update_blink_state();
 }
@@ -165,6 +168,21 @@ void move_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t vertical, int8_t hor
     }
 }
 
+void press_consumer(uint16_t code)
+{
+    if (!queue_try_add(&fifo_consumer, &code)) {
+        printf("Consumer report queue full!\r\n");
+    }
+}
+
+void release_consumer(void)
+{
+    uint16_t code = 0;
+    if (!queue_try_add(&fifo_consumer, &code)) {
+        printf("Consumer report queue full!\r\n");
+    }
+}
+
 //
 // private function for sending updated usb packet
 //
@@ -205,6 +223,12 @@ static void send_events(int report_id)
                     new_mouse_data.vertical,
                     new_mouse_data.horizontal);
         }
+    } else if (report_id == REPORT_ID_CONSUMER_CONTROL && !queue_is_empty(&fifo_consumer)) {
+        uint16_t code;
+        if (queue_try_remove(&fifo_consumer, &code)) {
+            // printf("Sending consumer code: %04x\r\n", code);
+            tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &code, sizeof(code));
+        }
     } else {
         // printf("Nothing more to send for id %d\r\n", report_id);
     }
@@ -231,7 +255,8 @@ void hid_task(void)
 
     if (tud_suspended() &&
             (!queue_is_empty(&fifo_keyboard) ||
-             !queue_is_empty(&fifo_mouse))) {
+             !queue_is_empty(&fifo_mouse) ||
+             !queue_is_empty(&fifo_consumer))) {
         // Wake up host if we are in suspend mode
         // and REMOTE_WAKEUP feature is enabled by host
         tud_remote_wakeup();
@@ -242,6 +267,8 @@ void hid_task(void)
     // try sending whichever we have in queue
     if (!queue_is_empty(&fifo_keyboard)) {
         send_events(REPORT_ID_KEYBOARD);
+    } else if (!queue_is_empty(&fifo_consumer)) {
+        send_events(REPORT_ID_CONSUMER_CONTROL);
     } else if (!queue_is_empty(&fifo_mouse)) {
         send_events(REPORT_ID_MOUSE);
     }
