@@ -14,6 +14,10 @@
 
 #include "lwip/apps/httpd.h"
 #include "lwip/apps/fs.h"
+#include "hardware/watchdog.h"
+
+#include "board.h"
+#include "ap_mode.h"
 
 // Uptime counter (seconds since boot)
 static uint32_t uptime_seconds = 0;
@@ -21,9 +25,6 @@ static uint32_t last_uptime_update = 0;
 
 // Buffer for dynamic API responses (header + body)
 static char api_response[512];
-
-// Custom file handle for API responses
-static struct fs_file api_file;
 
 // Update uptime counter
 static void update_uptime(void)
@@ -41,7 +42,8 @@ static int handle_api_status(struct fs_file *file)
     update_uptime();
 
     uint8_t mac[6];
-    cyw43_wifi_get_mac(&cyw43_state, CYW43_ITF_STA, mac);
+    int itf = in_ap_mode ? CYW43_ITF_AP : CYW43_ITF_STA;
+    cyw43_wifi_get_mac(&cyw43_state, itf, mac);
 
     const ip4_addr_t *ip = netif_ip4_addr(netif_default);
     char ip_str[16];
@@ -53,11 +55,12 @@ static int handle_api_status(struct fs_file *file)
     // Build JSON body first
     char body[256];
     int body_len = snprintf(body, sizeof(body),
-        "{\"hostname\":\"%s\",\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"ip\":\"%s\",\"uptime\":%lu}",
+        "{\"hostname\":\"%s\",\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"ip\":\"%s\",\"uptime\":%lu,\"mode\":\"%s\"}",
         hostname,
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
         ip_str,
-        (unsigned long)uptime_seconds);
+        (unsigned long)uptime_seconds,
+        in_ap_mode ? "ap" : "sta");
 
     // Build full response with HTTP headers
     int len = snprintf(api_response, sizeof(api_response),
@@ -77,12 +80,79 @@ static int handle_api_status(struct fs_file *file)
     return 1;
 }
 
+// Handle /api/reboot-ap - set force AP flag and reboot
+static int handle_api_reboot_ap(struct fs_file *file)
+{
+    printf("API: reboot-ap requested\r\n");
+
+    char body[] = "{\"status\":\"rebooting to AP mode\"}";
+    int body_len = strlen(body);
+
+    int len = snprintf(api_response, sizeof(api_response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "\r\n"
+        "%s",
+        body_len, body);
+
+    memset(file, 0, sizeof(struct fs_file));
+    file->data = api_response;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    // Set flag and schedule reboot via watchdog (gives time for response)
+    ap_mode_set_force_flag();
+    watchdog_enable(100, false);
+
+    return 1;
+}
+
+// Handle /api/reboot - simple reboot (back to normal mode)
+static int handle_api_reboot(struct fs_file *file)
+{
+    printf("API: reboot requested\r\n");
+
+    char body[] = "{\"status\":\"rebooting\"}";
+    int body_len = strlen(body);
+
+    int len = snprintf(api_response, sizeof(api_response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "\r\n"
+        "%s",
+        body_len, body);
+
+    memset(file, 0, sizeof(struct fs_file));
+    file->data = api_response;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    // Schedule reboot via watchdog (gives time for response)
+    watchdog_enable(100, false);
+
+    return 1;
+}
+
 // Custom file open handler - intercepts API requests
 int fs_open_custom(struct fs_file *file, const char *name)
 {
     // API endpoint: /api/status
     if (strcmp(name, "/api/status") == 0) {
         return handle_api_status(file);
+    }
+
+    // API endpoint: /api/reboot-ap - reboot into AP mode
+    if (strcmp(name, "/api/reboot-ap") == 0) {
+        return handle_api_reboot_ap(file);
+    }
+
+    // API endpoint: /api/reboot - simple reboot
+    if (strcmp(name, "/api/reboot") == 0) {
+        return handle_api_reboot(file);
     }
 
     // Not a custom file, let httpd try the embedded filesystem

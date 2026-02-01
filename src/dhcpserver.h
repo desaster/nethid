@@ -1,7 +1,9 @@
 /*
+ * This file is part of the MicroPython project, http://micropython.org/
+ *
  * The MIT License (MIT)
  *
- * Copyright (c) 2023 Upi Tamminen
+ * Copyright (c) 2018-2019 Damien P. George
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,49 +22,28 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
- *
  */
+#ifndef __DHCPSERVER_H
+#define __DHCPSERVER_H
 
-#ifndef __BOARD_H
-#define __BOARD_H
+#include "lwip/ip_addr.h"
 
-#include <pico/stdlib.h>
-#include <pico/stdio.h>
-#include <pico/cyw43_arch.h>
+#define DHCPS_BASE_IP (16)
+#define DHCPS_MAX_IP (8)
 
-enum {
-    // fully lit, capslock is on
-    BLINK_CAPSLOCK =                0b1111111111111111,
+typedef struct _dhcp_server_lease_t {
+    uint8_t mac[6];
+    uint16_t expiry;
+} dhcp_server_lease_t;
 
-    // slow blink
-    BLINK_SUSPENDED =               0b0000111100001111,
+typedef struct _dhcp_server_t {
+    ip_addr_t ip;
+    ip_addr_t nm;
+    dhcp_server_lease_t lease[DHCPS_MAX_IP];
+    struct udp_pcb *udp;
+} dhcp_server_t;
 
-    // normal blink (all ok)
-    BLINK_MOUNTED_WIFI_UP =         0b0011001100110011,
-
-    // two quick blinks, not mounted
-    BLINK_NOT_MOUNTED_WIFI_UP =     0b1010000000000000,
-
-    // three quick blinks, wifi down
-    BLINK_MOUNTED_WIFI_DOWN =       0b1010100000000000,
-
-    // four quick blinks, not mounted & wifi down
-    BLINK_NOT_MOUNTED_WIFI_DOWN =   0b1010101000000000,
-
-    // AP mode - double pulse pattern
-    BLINK_AP_MODE =                 0b1100110000000000,
-};
-
-#define BLINK_STATE_MS 500
-
-extern uint16_t blink_state;
-
-extern bool wifi_up;
-extern bool usb_mounted;
-extern bool usb_suspended;
-extern bool capslock_on;
-extern bool in_ap_mode;
-
-void update_blink_state(void);
+void dhcp_server_init(dhcp_server_t *d, ip_addr_t *ip, ip_addr_t *nm);
+void dhcp_server_deinit(dhcp_server_t *d);
 
 #endif

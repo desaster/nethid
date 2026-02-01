@@ -3,3 +3,4 @@ compile_commands.json
 .env
 **/__pycache__
 .cache
+src/httpd/fsdata.c

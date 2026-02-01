@@ -41,13 +41,14 @@ bool wifi_up = false;
 bool usb_mounted = false;
 bool usb_suspended = false;
 bool capslock_on = false;
+bool in_ap_mode = false;
 
 void update_blink_state(void)
 {
-    static uint16_t prev_blink_state = 0;
-
     if (usb_suspended) {
         blink_state = BLINK_SUSPENDED;
+    } else if (in_ap_mode) {
+        blink_state = BLINK_AP_MODE;
     } else if (wifi_up && usb_mounted) {
         blink_state = BLINK_MOUNTED_WIFI_UP;
     } else if (wifi_up && !usb_mounted) {
@@ -57,6 +58,4 @@ void update_blink_state(void)
     } else {
         blink_state = BLINK_NOT_MOUNTED_WIFI_DOWN;
     }
-
-    prev_blink_state = blink_state;
 }

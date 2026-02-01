@@ -5,6 +5,7 @@ interface DeviceStatus {
     mac: string;
     ip: string;
     uptime: number;
+    mode: "sta" | "ap";
 }
 
 async function fetchStatus(): Promise<DeviceStatus | null> {
@@ -42,16 +43,22 @@ function render(status: DeviceStatus | null): void {
         return;
     }
 
+    const isApMode = status.mode === "ap";
+    const statusText = isApMode ? "AP Mode - Configuration" : "Online";
+    const statusClass = isApMode ? "status-ap" : "status-ok";
+
     app.innerHTML = `
         <div class="container">
             <h1>NetHID</h1>
-            <p class="status-ok">Online</p>
+            <p class="${statusClass}">${statusText}</p>
             <table>
                 <tr><th>Hostname</th><td>${status.hostname}</td></tr>
                 <tr><th>MAC</th><td>${status.mac}</td></tr>
                 <tr><th>IP</th><td>${status.ip}</td></tr>
+                <tr><th>Mode</th><td>${isApMode ? "Access Point" : "Station"}</td></tr>
                 <tr><th>Uptime</th><td>${formatUptime(status.uptime)}</td></tr>
             </table>
+            ${isApMode ? '<p class="ap-note">Connect to your WiFi network to configure.</p>' : ''}
         </div>
     `;
 }

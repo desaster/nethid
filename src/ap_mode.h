@@ -23,46 +23,32 @@
  *
  */
 
-#ifndef __BOARD_H
-#define __BOARD_H
+#ifndef __AP_MODE_H
+#define __AP_MODE_H
 
-#include <pico/stdlib.h>
-#include <pico/stdio.h>
-#include <pico/cyw43_arch.h>
+#include <stdbool.h>
+#include <stdint.h>
 
-enum {
-    // fully lit, capslock is on
-    BLINK_CAPSLOCK =                0b1111111111111111,
+// AP mode configuration
+#define AP_SSID_PREFIX "NetHID-"
+#define AP_PASSWORD "nethid123"
 
-    // slow blink
-    BLINK_SUSPENDED =               0b0000111100001111,
+// BOOTSEL hold time in milliseconds
+#define BOOTSEL_HOLD_TIME_MS 5000
 
-    // normal blink (all ok)
-    BLINK_MOUNTED_WIFI_UP =         0b0011001100110011,
+// Check if "force AP" flag is set in flash
+bool ap_mode_check_force_flag(void);
 
-    // two quick blinks, not mounted
-    BLINK_NOT_MOUNTED_WIFI_UP =     0b1010000000000000,
+// Clear the "force AP" flag in flash
+void ap_mode_clear_force_flag(void);
 
-    // three quick blinks, wifi down
-    BLINK_MOUNTED_WIFI_DOWN =       0b1010100000000000,
+// Set the "force AP" flag in flash (called before reboot)
+void ap_mode_set_force_flag(void);
 
-    // four quick blinks, not mounted & wifi down
-    BLINK_NOT_MOUNTED_WIFI_DOWN =   0b1010101000000000,
+// Initialize and start AP mode with DHCP server
+int ap_mode_start(void);
 
-    // AP mode - double pulse pattern
-    BLINK_AP_MODE =                 0b1100110000000000,
-};
-
-#define BLINK_STATE_MS 500
-
-extern uint16_t blink_state;
-
-extern bool wifi_up;
-extern bool usb_mounted;
-extern bool usb_suspended;
-extern bool capslock_on;
-extern bool in_ap_mode;
-
-void update_blink_state(void);
+// Poll BOOTSEL button - call from main loop
+void bootsel_task(void);
 
 #endif

@@ -34,6 +34,8 @@ add_executable(${TARGET}
     src/usb.c
     src/usb_descriptors.c
     src/httpd/httpd.c
+    src/ap_mode.c
+    src/dhcpserver.c
     #${PICO_SDK_PATH}/lib/lwip/src/apps/mqtt/mqtt.c
     )
 
@@ -42,6 +44,8 @@ target_link_libraries(${TARGET}
     pico_lwip_http
     pico_stdlib
     pico_multicore
+    hardware_flash
+    hardware_sync
     #pico_lwip_mqtt
     tinyusb_board
     tinyusb_device

@@ -35,6 +35,7 @@
 #include "usb.h"
 #include "config.h"
 #include "httpd/httpd.h"
+#include "ap_mode.h"
 
 #define UART0_TX_PIN 16
 #define UART0_RX_PIN 17
@@ -44,8 +45,7 @@
 #define UART_DEBUG_RX_PIN UART0_RX_PIN
 #define UART_DEBUG_BAUD 115200
 
-bool key_toggle = false;
-struct udp_pcb *pcb;
+static struct udp_pcb *pcb;
 
 #define PACKET_TYPE_KEYBOARD 1
 #define PACKET_TYPE_MOUSE 2
@@ -83,6 +83,7 @@ void led_blinking_task(void);
 void hid_task(void);
 void wifi_task(void);
 int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t auth);
+int setup_ap_mode_server(void);
 
 int main()
 {
@@ -98,14 +99,47 @@ int main()
     printf("tusb_init()\r\n");
     tusb_init();
 
-    printf("setup_wifi()\r\n");
-    if (setup_wifi(
-                CYW43_COUNTRY_FINLAND,
-                WIFI_SSID,
-                WIFI_PASSWORD,
-                CYW43_AUTH_WPA2_MIXED_PSK) != 0) {
-        printf("Failed to connect to WiFi\n");
+    // Initialize WiFi chip first (needed for both modes)
+    printf("cyw43_arch_init()\r\n");
+    if (cyw43_arch_init()) {
+        printf("Failed to initialize cyw43\r\n");
         return 1;
+    }
+
+    // Check if we should start in AP mode
+    bool start_ap_mode = false;
+
+    if (ap_mode_check_force_flag()) {
+        printf("Force AP flag detected, clearing and starting AP mode\r\n");
+        ap_mode_clear_force_flag();
+        start_ap_mode = true;
+    }
+
+    if (start_ap_mode) {
+        // Start in AP mode
+        printf("Starting in AP mode\r\n");
+        in_ap_mode = true;
+        update_blink_state();
+
+        if (ap_mode_start() != 0) {
+            printf("Failed to start AP mode\r\n");
+            return 1;
+        }
+
+        // Start HTTP server in AP mode
+        setup_ap_mode_server();
+
+    } else {
+        // Start in STA mode (normal operation)
+        printf("setup_wifi()\r\n");
+        if (setup_wifi(
+                    CYW43_COUNTRY_FINLAND,
+                    WIFI_SSID,
+                    WIFI_PASSWORD,
+                    CYW43_AUTH_WPA2_MIXED_PSK) != 0) {
+            printf("Failed to connect to WiFi\n");
+            return 1;
+        }
     }
 
     printf("Entering main loop\r\n");
@@ -117,8 +151,13 @@ int main()
         // need to call periodically when using pico_cyw43_arch_lwip_poll
         cyw43_arch_poll();
 
-        // check wifi status
-        wifi_task();
+        // check wifi status (only in STA mode)
+        if (!in_ap_mode) {
+            wifi_task();
+        }
+
+        // check BOOTSEL button for AP mode trigger
+        bootsel_task();
 
         // send usb hid report if needed, and stuff
         hid_task();
@@ -135,10 +174,7 @@ int main()
 
 int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t auth)
 {
-    printf("cyw43_arch_init()\r\n");
-    if (cyw43_arch_init()) {
-        return 1;
-    }
+    // cyw43_arch_init() already called in main()
     printf("cyw43_arch_enable_sta_mode()\r\n");
     cyw43_arch_enable_sta_mode();
 
@@ -177,8 +213,6 @@ static void udp_receive(
     if (p == NULL) {
         return;
     }
-
-    uint8_t *req_data = (uint8_t *) p->payload;
 
     if (p->len < sizeof(packet_header)) {
         printf("Packet too short\r\n");
@@ -246,23 +280,6 @@ static void udp_receive(
         return;
     }
 
-    /*
-    printf("Received %d bytes from %s:%d\r\n", p->len, ip4addr_ntoa(addr), port);
-    for (int i = 0; i < p->len; i++) {
-        printf("%02x ", req_data[i]);
-    }
-    printf("\r\n");
-    for (int i = 0; i < p->len; i++) {
-        // check if charactes printable ascii
-        if (req_data[i] >= 0x20 && req_data[i] <= 0x7e) {
-            printf("%c", req_data[i]);
-        } else {
-            printf(".");
-        }
-    }
-    printf("\r\n");
-    */
-
     pbuf_free(p);
 }
 
@@ -280,6 +297,23 @@ int setup_server()
     nethid_httpd_init();
 
     cyw43_arch_lwip_end();
+
+    return 0;
+}
+
+int setup_ap_mode_server()
+{
+    cyw43_arch_lwip_begin();
+
+    printf("AP mode server starting\n");
+    printf("IP address: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_list)));
+
+    // Start HTTP server (no UDP listener in AP mode)
+    nethid_httpd_init();
+
+    cyw43_arch_lwip_end();
+
+    return 0;
 }
 
 // poll for wifi status
@@ -316,7 +350,6 @@ void wifi_task(void)
                 update_blink_state();
                 setup_server();
             }
-            // TODO: also should unsetup server
             break;
         case CYW43_LINK_FAIL:
             if (prev_result != result) {
