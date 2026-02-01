@@ -29,12 +29,16 @@ TODO:
 
 ## Building
 
-To build without docker:
+First, create a `.env` file with your WiFi credentials (see `.env.example`):
 ```
-WIFI_SSID=foo WIFI_PASSWORD=bar ./build.sh
+WIFI_SSID=your_network
+WIFI_PASSWORD=your_password
 ```
 
-or...
+Then build:
+```
+./build.sh
+```
 
 To build with docker, first build the docker image:
 
@@ -45,7 +49,7 @@ docker build -t nethiddev:latest .
 Then build the project itself:
 
 ```
-WIFI_SSID=foo WIFI_PASSOWRD=bar USE_DOCKER=1 ./build.sh
+USE_DOCKER=1 ./build.sh
 ```
 
 After a successful build, the resulting binary should be available in
