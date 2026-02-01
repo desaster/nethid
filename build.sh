@@ -1,17 +1,25 @@
 #!/bin/sh
 #
-# To build without docker:
-#   WIFI_SSID=foo WIFI_PASSWORD=bar ./build.sh
+# To build, create a .env file with your WiFi credentials:
+#   WIFI_SSID=your_network
+#   WIFI_PASSWORD=your_password
 #
-# or...
+# Then run:
+#   ./build.sh
 #
 # To build with docker, first build the docker image:
 #   docker build -t nethiddev:latest .
 #
 # Then build the project itself:
-#   WIFI_SSID=foo WIFI_PASSOWRD=bar USE_DOCKER=1 ./build.sh
+#   USE_DOCKER=1 ./build.sh
 
 set -e
+
+# Load WiFi credentials from .env file if it exists
+if [ -f .env ]; then
+    . ./.env
+    export WIFI_SSID WIFI_PASSWORD
+fi
 
 USE_DOCKER="${USE_DOCKER:-0}"
 export PICO_SDK_PATH="${PICO_SDK_PATH:-$HOME/pico-sdk}"
