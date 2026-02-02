@@ -85,23 +85,32 @@ static bool __no_inline_not_in_flash_func(get_bootsel_button)(void)
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic value to identify valid config (version 2 with credentials)
-#define CONFIG_MAGIC 0x4E455432  // "NET2" (version 2)
+// Magic value to identify valid config (version 3 with settings)
+#define CONFIG_MAGIC 0x4E455433  // "NET3" (version 3)
+
+// Settings flags bitfield
+#define SETTINGS_FLAG_HOSTNAME (1 << 0)
 
 // Config structure stored in flash
 typedef struct {
     uint32_t magic;
+    uint32_t settings_flags;     // Bitfield: which settings are configured
     uint8_t force_ap_mode;
     uint8_t has_credentials;     // 1 if SSID/password are valid
-    uint8_t reserved[2];
+    uint8_t reserved_flags[2];
     char wifi_ssid[WIFI_SSID_MAX_LEN + 1];      // null-terminated
     char wifi_password[WIFI_PASSWORD_MAX_LEN + 1];  // null-terminated
+    char hostname[HOSTNAME_MAX_LEN + 1];        // null-terminated
+    uint8_t reserved_settings[128];             // Future settings space
     uint32_t checksum;
 } flash_config_t;
 
 // Static state
 static char ap_ssid[32];
 static dhcp_server_t dhcp_server;
+
+// Forward declarations
+static void write_config(const flash_config_t *cfg);
 
 // Calculate simple checksum over config data (excluding checksum field itself)
 static uint32_t calc_checksum(const flash_config_t *cfg)
@@ -137,8 +146,12 @@ static bool read_config(flash_config_t *cfg)
 // Write config to flash
 static void write_config(const flash_config_t *cfg)
 {
+    // Calculate number of pages needed (round up to page size)
+    const size_t pages_needed = (sizeof(flash_config_t) + FLASH_PAGE_SIZE - 1) / FLASH_PAGE_SIZE;
+    const size_t buffer_size = pages_needed * FLASH_PAGE_SIZE;
+
     // Prepare data with proper alignment (flash writes must be 256-byte aligned)
-    uint8_t buffer[FLASH_PAGE_SIZE] __attribute__((aligned(4)));
+    uint8_t buffer[buffer_size] __attribute__((aligned(4)));
     memset(buffer, 0xFF, sizeof(buffer));
     memcpy(buffer, cfg, sizeof(flash_config_t));
 
@@ -148,8 +161,8 @@ static void write_config(const flash_config_t *cfg)
     // Erase the sector
     flash_range_erase(FLASH_CONFIG_OFFSET, FLASH_SECTOR_SIZE);
 
-    // Write the page
-    flash_range_program(FLASH_CONFIG_OFFSET, buffer, FLASH_PAGE_SIZE);
+    // Write the pages
+    flash_range_program(FLASH_CONFIG_OFFSET, buffer, buffer_size);
 
     restore_interrupts(ints);
 }
@@ -406,4 +419,92 @@ void bootsel_task(void)
             // Should never get here, we reboot
             break;
     }
+}
+
+//--------------------------------------------------------------------+
+// Device Settings API
+//--------------------------------------------------------------------+
+
+// Generate default hostname from MAC address
+static void generate_default_hostname(char *hostname, size_t len)
+{
+    uint8_t mac[6];
+    cyw43_wifi_get_mac(&cyw43_state, CYW43_ITF_STA, mac);
+    snprintf(hostname, len, "picow-%02x%02x%02x", mac[3], mac[4], mac[5]);
+}
+
+// Validate hostname (RFC 1123)
+static bool validate_hostname(const char *hostname)
+{
+    if (hostname == NULL) return false;
+
+    size_t len = strlen(hostname);
+    if (len == 0 || len > HOSTNAME_MAX_LEN) return false;
+
+    // Cannot start or end with hyphen
+    if (hostname[0] == '-' || hostname[len - 1] == '-') return false;
+
+    // Must contain only alphanumeric and hyphen
+    for (size_t i = 0; i < len; i++) {
+        char c = hostname[i];
+        if (!((c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') ||
+              c == '-')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool settings_get_hostname(char *hostname)
+{
+    flash_config_t cfg;
+
+    if (read_config(&cfg) && (cfg.settings_flags & SETTINGS_FLAG_HOSTNAME) && cfg.hostname[0] != '\0') {
+        strncpy(hostname, cfg.hostname, HOSTNAME_MAX_LEN);
+        hostname[HOSTNAME_MAX_LEN] = '\0';
+        return true;
+    }
+
+    // Return default hostname
+    generate_default_hostname(hostname, HOSTNAME_MAX_LEN + 1);
+    return false;
+}
+
+bool settings_hostname_is_default(void)
+{
+    flash_config_t cfg;
+    return !read_config(&cfg) || !(cfg.settings_flags & SETTINGS_FLAG_HOSTNAME) || cfg.hostname[0] == '\0';
+}
+
+bool settings_set_hostname(const char *hostname)
+{
+    if (!validate_hostname(hostname)) {
+        printf("Invalid hostname: %s\r\n", hostname ? hostname : "(null)");
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    // Try to read existing config to preserve other settings
+    if (!read_config(&cfg)) {
+        // No valid config, create fresh
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.magic = CONFIG_MAGIC;
+        cfg.force_ap_mode = 0;
+        cfg.has_credentials = 0;
+    }
+
+    // Store hostname
+    strncpy(cfg.hostname, hostname, HOSTNAME_MAX_LEN);
+    cfg.hostname[HOSTNAME_MAX_LEN] = '\0';
+    cfg.settings_flags |= SETTINGS_FLAG_HOSTNAME;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("Hostname saved: %s\r\n", hostname);
+    return true;
 }

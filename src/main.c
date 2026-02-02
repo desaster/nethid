@@ -213,11 +213,10 @@ int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t au
     // Disable power save mode to prevent AP disassociation due to inactivity
     cyw43_wifi_pm(&cyw43_state, CYW43_NO_POWERSAVE_MODE);
 
-    char hostname[16];
-    uint8_t mac[6];
-    cyw43_wifi_get_mac(&cyw43_state, CYW43_ITF_STA, mac);
-    sprintf(hostname, "picow-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    char hostname[HOSTNAME_MAX_LEN + 1];
+    settings_get_hostname(hostname);
     netif_set_hostname(netif_default, hostname);
+    printf("Hostname: %s\r\n", hostname);
 
     printf("cyw43_arch_wifi_connect_async(%s, ..., ...)\r\n", ssid);
     wifi_up = false;

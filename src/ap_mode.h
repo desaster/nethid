@@ -40,6 +40,9 @@
 #define WIFI_SSID_MAX_LEN 32
 #define WIFI_PASSWORD_MAX_LEN 64
 
+// Device settings limits
+#define HOSTNAME_MAX_LEN 32
+
 // Check if "force AP" flag is set in flash
 bool ap_mode_check_force_flag(void);
 
@@ -64,6 +67,19 @@ bool wifi_credentials_set(const char *ssid, const char *password);
 
 // Get only the SSID (for status display, without exposing password)
 bool wifi_credentials_get_ssid(char *ssid);
+
+// Device settings API
+// Get hostname - returns configured hostname or MAC-based default
+// hostname buffer must be at least HOSTNAME_MAX_LEN+1 bytes
+// Returns true if configured hostname was found, false if using default
+bool settings_get_hostname(char *hostname);
+
+// Set hostname - validates and stores to flash
+// Returns true on success, false on invalid hostname
+bool settings_set_hostname(const char *hostname);
+
+// Check if hostname is the auto-generated default
+bool settings_hostname_is_default(void);
 
 // Initialize and start AP mode with DHCP server
 int ap_mode_start(void);

@@ -42,6 +42,10 @@ static size_t post_body_len = 0;
 static bool post_config_success = false;
 static bool scan_triggered = false;
 
+// Settings API state
+static bool settings_api_success = false;
+static char settings_api_error[64] = "";
+
 // HID API state
 static uint8_t current_mouse_buttons = 0;
 static bool hid_api_success = false;
@@ -166,8 +170,8 @@ static int handle_api_status(struct fs_file *file)
     char ip_str[16];
     snprintf(ip_str, sizeof(ip_str), "%s", ip4addr_ntoa(ip));
 
-    char hostname[32];
-    snprintf(hostname, sizeof(hostname), "picow-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    char hostname[HOSTNAME_MAX_LEN + 1];
+    settings_get_hostname(hostname);
 
     char body[256];
     int body_len = snprintf(body, sizeof(body),
@@ -182,27 +186,21 @@ static int handle_api_status(struct fs_file *file)
     return 1;
 }
 
-// GET /api/reboot-ap - reboot into AP mode
-static int handle_api_reboot_ap(struct fs_file *file)
+// POST /api/reboot-ap result
+static int handle_api_reboot_ap_result(struct fs_file *file)
 {
-    printf("API: reboot-ap requested\r\n");
-
     char body[] = "{\"status\":\"rebooting to AP mode\"}";
     api_json_response(file, body, strlen(body));
-
     ap_mode_set_force_flag();
     watchdog_enable(100, false);
     return 1;
 }
 
-// GET /api/reboot - simple reboot
-static int handle_api_reboot(struct fs_file *file)
+// POST /api/reboot result
+static int handle_api_reboot_result(struct fs_file *file)
 {
-    printf("API: reboot requested\r\n");
-
     char body[] = "{\"status\":\"rebooting\"}";
     api_json_response(file, body, strlen(body));
-
     watchdog_enable(100, false);
     return 1;
 }
@@ -296,6 +294,73 @@ static int handle_api_scan_result(struct fs_file *file)
 
     api_json_response(file, body, body_len);
     return 1;
+}
+
+//--------------------------------------------------------------------+
+// Settings API Handlers
+//--------------------------------------------------------------------+
+
+// GET /api/settings - device settings
+static int handle_api_settings_get(struct fs_file *file)
+{
+    char hostname[HOSTNAME_MAX_LEN + 1];
+    bool is_default = !settings_get_hostname(hostname);
+
+    char escaped_hostname[HOSTNAME_MAX_LEN * 2 + 1];
+    escape_json_string(hostname, escaped_hostname, sizeof(escaped_hostname));
+
+    char body[256];
+    int body_len = snprintf(body, sizeof(body),
+        "{\"hostname\":{\"value\":\"%s\",\"default\":%s}}",
+        escaped_hostname,
+        is_default ? "true" : "false");
+
+    api_json_response(file, body, body_len);
+    return 1;
+}
+
+// POST /api/settings result
+static int handle_api_settings_result(struct fs_file *file)
+{
+    char body[128];
+    int body_len;
+
+    if (settings_api_success) {
+        body_len = snprintf(body, sizeof(body), "{\"success\":true}");
+    } else {
+        char escaped_error[64];
+        escape_json_string(settings_api_error, escaped_error, sizeof(escaped_error));
+        body_len = snprintf(body, sizeof(body),
+            "{\"success\":false,\"error\":\"%s\"}", escaped_error);
+    }
+
+    api_json_response(file, body, body_len);
+    return 1;
+}
+
+// Process POST /api/settings
+static void process_settings_post(void)
+{
+    size_t hostname_len = 0;
+    const char *hostname = json_find_string(post_body, "hostname", &hostname_len);
+
+    if (hostname && hostname_len > 0) {
+        if (hostname_len > HOSTNAME_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "Hostname too long");
+            return;
+        }
+
+        char hostname_buf[HOSTNAME_MAX_LEN + 1];
+        memcpy(hostname_buf, hostname, hostname_len);
+        hostname_buf[hostname_len] = '\0';
+
+        if (!settings_set_hostname(hostname_buf)) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "Invalid hostname format");
+            return;
+        }
+    }
+
+    settings_api_success = true;
 }
 
 //--------------------------------------------------------------------+
@@ -449,12 +514,14 @@ int fs_open_custom(struct fs_file *file, const char *name)
 {
     // Device/Config APIs
     if (strcmp(name, "/api/status") == 0) return handle_api_status(file);
-    if (strcmp(name, "/api/reboot-ap") == 0) return handle_api_reboot_ap(file);
-    if (strcmp(name, "/api/reboot") == 0) return handle_api_reboot(file);
+    if (strcmp(name, "/api/reboot/result") == 0) return handle_api_reboot_result(file);
+    if (strcmp(name, "/api/reboot-ap/result") == 0) return handle_api_reboot_ap_result(file);
     if (strcmp(name, "/api/config") == 0) return handle_api_config_get(file);
     if (strcmp(name, "/api/config/result") == 0) return handle_api_config_post_result(file);
     if (strcmp(name, "/api/networks") == 0) return handle_api_networks(file);
     if (strcmp(name, "/api/scan/result") == 0) return handle_api_scan_result(file);
+    if (strcmp(name, "/api/settings") == 0) return handle_api_settings_get(file);
+    if (strcmp(name, "/api/settings/result") == 0) return handle_api_settings_result(file);
 
     // HID API
     if (strcmp(name, "/api/hid/result") == 0) return handle_api_hid_result(file);
@@ -492,15 +559,20 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *http_reque
 
     bool is_config_endpoint = (
         strcmp(uri, "/api/config") == 0 ||
-        strcmp(uri, "/api/scan") == 0
+        strcmp(uri, "/api/scan") == 0 ||
+        strcmp(uri, "/api/settings") == 0 ||
+        strcmp(uri, "/api/reboot") == 0 ||
+        strcmp(uri, "/api/reboot-ap") == 0
     );
 
     if (!is_hid_endpoint && !is_config_endpoint) {
         return ERR_VAL;
     }
 
-    // For /api/scan, we don't need a body
-    if (strcmp(uri, "/api/scan") == 0) {
+    // For /api/scan, /api/reboot, /api/reboot-ap we don't need a body
+    if (strcmp(uri, "/api/scan") == 0 ||
+        strcmp(uri, "/api/reboot") == 0 ||
+        strcmp(uri, "/api/reboot-ap") == 0) {
         strncpy(post_uri, uri, sizeof(post_uri) - 1);
         post_uri[sizeof(post_uri) - 1] = '\0';
         return ERR_OK;
@@ -529,6 +601,8 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *http_reque
     post_config_success = false;
     hid_api_success = false;
     hid_api_error[0] = '\0';
+    settings_api_success = false;
+    settings_api_error[0] = '\0';
 
     return ERR_OK;
 }
@@ -571,6 +645,27 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_ur
     if (strcmp(post_uri, "/api/scan") == 0) {
         scan_triggered = (wifi_scan_start() == 0);
         snprintf(response_uri, response_uri_len, "/api/scan/result");
+        return;
+    }
+
+    // Handle /api/reboot
+    if (strcmp(post_uri, "/api/reboot") == 0) {
+        printf("API: reboot requested\r\n");
+        snprintf(response_uri, response_uri_len, "/api/reboot/result");
+        return;
+    }
+
+    // Handle /api/reboot-ap
+    if (strcmp(post_uri, "/api/reboot-ap") == 0) {
+        printf("API: reboot-ap requested\r\n");
+        snprintf(response_uri, response_uri_len, "/api/reboot-ap/result");
+        return;
+    }
+
+    // Handle /api/settings
+    if (strcmp(post_uri, "/api/settings") == 0) {
+        process_settings_post();
+        snprintf(response_uri, response_uri_len, "/api/settings/result");
         return;
     }
 

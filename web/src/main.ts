@@ -43,6 +43,13 @@ interface NetworksResponse {
     networks: WifiNetwork[];
 }
 
+interface SettingsResponse {
+    hostname: {
+        value: string;
+        default: boolean;
+    };
+}
+
 // Global state
 let selectedNetwork: string | null = null;
 let cachedNetworks: NetworksResponse | null = null;
@@ -99,6 +106,50 @@ async function saveCredentials(ssid: string, password: string): Promise<{ succes
     }
 }
 
+async function fetchSettings(): Promise<SettingsResponse | null> {
+    try {
+        const response = await fetch("/api/settings");
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch settings:", error);
+        return null;
+    }
+}
+
+async function saveSettings(settings: { hostname?: string }): Promise<{ success: boolean; error?: string }> {
+    try {
+        const response = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(settings)
+        });
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to save settings:", error);
+        return { success: false, error: "Network error" };
+    }
+}
+
+function isValidHostname(hostname: string): boolean {
+    // RFC 1123: alphanumeric + hyphen, 1-32 chars, no leading/trailing hyphen
+    if (hostname.length === 0 || hostname.length > 32) return false;
+    const regex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$/;
+    return hostname.length === 1 ? /^[a-zA-Z0-9]$/.test(hostname) : regex.test(hostname);
+}
+
+async function rebootDevice(): Promise<boolean> {
+    try {
+        const response = await fetch("/api/reboot", { method: "POST" });
+        return response.ok;
+    } catch (error) {
+        console.error("Failed to reboot:", error);
+        return false;
+    }
+}
+
 function formatUptime(seconds: number): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -138,7 +189,7 @@ function renderStatusPage(status: DeviceStatus): void {
             <h1>NetHID</h1>
             <p class="status-ok">Online</p>
             <table>
-                <tr><th>Hostname</th><td>${status.hostname}</td></tr>
+                <tr><th>Hostname</th><td>${escapeHtml(status.hostname)}</td></tr>
                 <tr><th>MAC</th><td>${status.mac}</td></tr>
                 <tr><th>IP</th><td>${status.ip}</td></tr>
                 <tr><th>Mode</th><td>Station</td></tr>
@@ -147,11 +198,18 @@ function renderStatusPage(status: DeviceStatus): void {
             <button id="control-btn" class="btn-primary" style="margin-top: 1.5rem; width: 100%;">
                 Open Remote Control
             </button>
+            <button id="settings-btn" class="btn-secondary" style="margin-top: 0.5rem; width: 100%;">
+                Settings
+            </button>
         </div>
     `;
 
     document.getElementById("control-btn")?.addEventListener("click", () => {
         renderControlPage();
+    });
+
+    document.getElementById("settings-btn")?.addEventListener("click", () => {
+        renderSettingsPage();
     });
 }
 
@@ -339,6 +397,112 @@ function cleanupControl(): void {
     touchTrackpad = null;
     hidClient?.disconnect();
     hidClient = null;
+}
+
+async function renderSettingsPage(): Promise<void> {
+    const app = document.querySelector<HTMLDivElement>("#app")!;
+
+    app.innerHTML = `
+        <div class="container">
+            <h1>NetHID</h1>
+            <p class="status-ok">Settings</p>
+            <p>Loading settings...</p>
+        </div>
+    `;
+
+    const settings = await fetchSettings();
+    if (!settings) {
+        app.innerHTML = `
+            <div class="container">
+                <h1>NetHID</h1>
+                <p class="error">Failed to load settings</p>
+                <button id="back-btn" class="btn-secondary">Back</button>
+            </div>
+        `;
+        document.getElementById("back-btn")?.addEventListener("click", init);
+        return;
+    }
+
+    app.innerHTML = `
+        <div class="container">
+            <h1>NetHID</h1>
+            <p class="status-ok">Settings</p>
+
+            <form id="settings-form" class="settings-form">
+                <div class="form-group">
+                    <label for="hostname-input">Hostname</label>
+                    <input type="text" id="hostname-input"
+                           value="${escapeHtml(settings.hostname.value)}"
+                           maxlength="32"
+                           placeholder="Enter hostname">
+                    ${settings.hostname.default ? `<p class="form-hint">Using auto-generated default</p>` : ""}
+                    <p class="form-hint hostname-hint">Letters, numbers, and hyphens only (1-32 chars)</p>
+                </div>
+
+                <div id="settings-message" class="status-message"></div>
+
+                <button type="submit" id="save-btn" class="btn-primary">Save Settings</button>
+            </form>
+
+            <div class="settings-actions">
+                <button id="back-btn" class="btn-secondary">Back to Status</button>
+                <button id="reboot-btn" class="btn-secondary btn-danger" style="margin-top: 0.5rem;">Reboot Device</button>
+            </div>
+        </div>
+    `;
+
+    // Back button
+    document.getElementById("back-btn")?.addEventListener("click", init);
+
+    // Reboot button
+    document.getElementById("reboot-btn")?.addEventListener("click", async () => {
+        if (!confirm("Reboot the device?")) return;
+        const messageEl = document.getElementById("settings-message")!;
+        messageEl.textContent = "Rebooting...";
+        messageEl.className = "status-message status-info";
+        await rebootDevice();
+        messageEl.textContent = "Device is rebooting. Please wait...";
+    });
+
+    // Form submission
+    document.getElementById("settings-form")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const hostnameInput = document.getElementById("hostname-input") as HTMLInputElement;
+        const messageEl = document.getElementById("settings-message")!;
+        const hostname = hostnameInput.value.trim();
+
+        // Validate hostname
+        if (!isValidHostname(hostname)) {
+            messageEl.textContent = "Invalid hostname format";
+            messageEl.className = "status-message status-error";
+            return;
+        }
+
+        // Show saving status
+        messageEl.textContent = "Saving...";
+        messageEl.className = "status-message status-info";
+
+        const result = await saveSettings({ hostname });
+
+        if (result.success) {
+            messageEl.textContent = "Settings saved! Changes take effect after reboot.";
+            messageEl.className = "status-message status-success";
+        } else {
+            messageEl.textContent = "Error: " + (result.error || "Unknown error");
+            messageEl.className = "status-message status-error";
+        }
+    });
+
+    // Real-time hostname validation
+    document.getElementById("hostname-input")?.addEventListener("input", (e) => {
+        const input = e.target as HTMLInputElement;
+        const hintEl = document.querySelector(".hostname-hint") as HTMLElement;
+        if (input.value.length > 0 && !isValidHostname(input.value)) {
+            hintEl.classList.add("hint-error");
+        } else {
+            hintEl.classList.remove("hint-error");
+        }
+    });
 }
 
 function renderWifiConfigPage(status: DeviceStatus, networks: NetworksResponse | null): void {
