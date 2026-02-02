@@ -2,6 +2,8 @@
 
 ## Wi-Fi controlled virtual USB keyboard and mouse
 
+![NetHID](pics/nethid_photo.png)
+
 This firmware turns the [Pico W](https://www.raspberrypi.com/documentation/microcontrollers/raspberry-pi-pico.html)
 microcontroller board into a virtual keyboard and mouse, controllable over
 wireless network.
@@ -38,6 +40,8 @@ To return to AP mode later, hold the BOOTSEL button for 5+ seconds until the LED
 
 Once connected to your network, access the web interface at the device's IP address or hostname.
 
+![Web interface](pics/nethid_web_example.png)
+
 The web UI provides:
 - Virtual keyboard (TKL layout for desktop, compact layout for mobile)
 - Mouse control via trackpad area
@@ -59,6 +63,8 @@ Configure via Settings in the web UI. The device subscribes to `{topic}/#`.
 Key names: `a`-`z`, `0`-`9`, `ENTER`, `ESCAPE`, `TAB`, `SPACE`, `BACKSPACE`, `DELETE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `F1`-`F12`, `CTRL`, `SHIFT`, `ALT`, `GUI`, `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`, `PLAY_PAUSE`, etc.
 
 Omit `down` field for tap (press + release). Use `down: true` for press, `down: false` for release.
+
+![Home Assistant example](pics/nethid_ha_example.png)
 
 ## Building
 
