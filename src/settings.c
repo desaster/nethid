@@ -40,8 +40,8 @@
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic value to identify valid config (version 3 with settings)
-#define CONFIG_MAGIC 0x4E455433  // "NET3" (version 3)
+// Magic value to identify valid config (version 4 with MQTT settings)
+#define CONFIG_MAGIC 0x4E455434  // "NET4" (version 4)
 
 // Config structure stored in flash
 typedef struct {
@@ -53,7 +53,15 @@ typedef struct {
     char wifi_ssid[WIFI_SSID_MAX_LEN + 1];      // null-terminated
     char wifi_password[WIFI_PASSWORD_MAX_LEN + 1];  // null-terminated
     char hostname[HOSTNAME_MAX_LEN + 1];        // null-terminated
-    uint8_t reserved_settings[128];             // Future settings space
+    // MQTT settings (added in version 4)
+    uint8_t mqtt_enabled;
+    uint16_t mqtt_port;
+    char mqtt_broker[MQTT_BROKER_MAX_LEN + 1];      // null-terminated
+    char mqtt_topic[MQTT_TOPIC_MAX_LEN + 1];        // null-terminated
+    char mqtt_username[MQTT_USERNAME_MAX_LEN + 1];  // null-terminated
+    char mqtt_password[MQTT_PASSWORD_MAX_LEN + 1];  // null-terminated
+    char mqtt_client_id[MQTT_CLIENT_ID_MAX_LEN + 1]; // null-terminated
+    uint8_t reserved_settings[64];              // Future settings space
     uint32_t checksum;
 } flash_config_t;
 
@@ -119,6 +127,8 @@ static void init_fresh_config(flash_config_t *cfg)
     cfg->magic = CONFIG_MAGIC;
     cfg->force_ap_mode = 0;
     cfg->has_credentials = 0;
+    cfg->mqtt_enabled = 0;
+    cfg->mqtt_port = MQTT_DEFAULT_PORT;
 }
 
 //--------------------------------------------------------------------+
@@ -352,5 +362,348 @@ bool settings_set_hostname(const char *hostname)
     write_config(&cfg);
 
     printf("Hostname saved: %s\r\n", hostname);
+    return true;
+}
+
+//--------------------------------------------------------------------+
+// MQTT Settings
+//--------------------------------------------------------------------+
+
+bool settings_get_mqtt_enabled(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    return (cfg.settings_flags & SETTINGS_FLAG_MQTT_ENABLED) && cfg.mqtt_enabled;
+}
+
+bool settings_set_mqtt_enabled(bool enabled)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    cfg.mqtt_enabled = enabled ? 1 : 0;
+    cfg.settings_flags |= SETTINGS_FLAG_MQTT_ENABLED;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT %s\r\n", enabled ? "enabled" : "disabled");
+    return true;
+}
+
+bool settings_get_mqtt_broker(char *broker)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        broker[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_BROKER) || cfg.mqtt_broker[0] == '\0') {
+        broker[0] = '\0';
+        return false;
+    }
+
+    strncpy(broker, cfg.mqtt_broker, MQTT_BROKER_MAX_LEN);
+    broker[MQTT_BROKER_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_mqtt_broker(const char *broker)
+{
+    if (broker == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(broker);
+    if (len > MQTT_BROKER_MAX_LEN) {
+        printf("MQTT broker too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.mqtt_broker, 0, sizeof(cfg.mqtt_broker));
+    strncpy(cfg.mqtt_broker, broker, MQTT_BROKER_MAX_LEN);
+    cfg.settings_flags |= SETTINGS_FLAG_MQTT_BROKER;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT broker saved: %s\r\n", broker);
+    return true;
+}
+
+uint16_t settings_get_mqtt_port(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return MQTT_DEFAULT_PORT;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_PORT) || cfg.mqtt_port == 0) {
+        return MQTT_DEFAULT_PORT;
+    }
+
+    return cfg.mqtt_port;
+}
+
+bool settings_set_mqtt_port(uint16_t port)
+{
+    if (port == 0) {
+        printf("Invalid MQTT port: 0\r\n");
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    cfg.mqtt_port = port;
+    cfg.settings_flags |= SETTINGS_FLAG_MQTT_PORT;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT port saved: %u\r\n", port);
+    return true;
+}
+
+bool settings_get_mqtt_topic(char *topic)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        topic[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_TOPIC) || cfg.mqtt_topic[0] == '\0') {
+        topic[0] = '\0';
+        return false;
+    }
+
+    strncpy(topic, cfg.mqtt_topic, MQTT_TOPIC_MAX_LEN);
+    topic[MQTT_TOPIC_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_mqtt_topic(const char *topic)
+{
+    if (topic == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(topic);
+    if (len > MQTT_TOPIC_MAX_LEN) {
+        printf("MQTT topic too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.mqtt_topic, 0, sizeof(cfg.mqtt_topic));
+    strncpy(cfg.mqtt_topic, topic, MQTT_TOPIC_MAX_LEN);
+    cfg.settings_flags |= SETTINGS_FLAG_MQTT_TOPIC;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT topic saved: %s\r\n", topic);
+    return true;
+}
+
+bool settings_get_mqtt_username(char *username)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        username[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_USER) || cfg.mqtt_username[0] == '\0') {
+        username[0] = '\0';
+        return false;
+    }
+
+    strncpy(username, cfg.mqtt_username, MQTT_USERNAME_MAX_LEN);
+    username[MQTT_USERNAME_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_mqtt_username(const char *username)
+{
+    if (username == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(username);
+    if (len > MQTT_USERNAME_MAX_LEN) {
+        printf("MQTT username too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.mqtt_username, 0, sizeof(cfg.mqtt_username));
+    if (len > 0) {
+        strncpy(cfg.mqtt_username, username, MQTT_USERNAME_MAX_LEN);
+        cfg.settings_flags |= SETTINGS_FLAG_MQTT_USER;
+    } else {
+        cfg.settings_flags &= ~SETTINGS_FLAG_MQTT_USER;
+    }
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT username %s\r\n", len > 0 ? "saved" : "cleared");
+    return true;
+}
+
+bool settings_get_mqtt_password(char *password)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        password[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_PASS) || cfg.mqtt_password[0] == '\0') {
+        password[0] = '\0';
+        return false;
+    }
+
+    strncpy(password, cfg.mqtt_password, MQTT_PASSWORD_MAX_LEN);
+    password[MQTT_PASSWORD_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_mqtt_password(const char *password)
+{
+    if (password == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(password);
+    if (len > MQTT_PASSWORD_MAX_LEN) {
+        printf("MQTT password too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.mqtt_password, 0, sizeof(cfg.mqtt_password));
+    if (len > 0) {
+        strncpy(cfg.mqtt_password, password, MQTT_PASSWORD_MAX_LEN);
+        cfg.settings_flags |= SETTINGS_FLAG_MQTT_PASS;
+    } else {
+        cfg.settings_flags &= ~SETTINGS_FLAG_MQTT_PASS;
+    }
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT password %s\r\n", len > 0 ? "saved" : "cleared");
+    return true;
+}
+
+bool settings_mqtt_has_password(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    return (cfg.settings_flags & SETTINGS_FLAG_MQTT_PASS) && cfg.mqtt_password[0] != '\0';
+}
+
+bool settings_get_mqtt_client_id(char *client_id)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        // Fall back to hostname (use internal buffer to avoid overflow since
+        // HOSTNAME_MAX_LEN > MQTT_CLIENT_ID_MAX_LEN)
+        char hostname[HOSTNAME_MAX_LEN + 1];
+        settings_get_hostname(hostname);
+        strncpy(client_id, hostname, MQTT_CLIENT_ID_MAX_LEN);
+        client_id[MQTT_CLIENT_ID_MAX_LEN] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_MQTT_CLIENT_ID) || cfg.mqtt_client_id[0] == '\0') {
+        // Fall back to hostname (use internal buffer to avoid overflow)
+        char hostname[HOSTNAME_MAX_LEN + 1];
+        settings_get_hostname(hostname);
+        strncpy(client_id, hostname, MQTT_CLIENT_ID_MAX_LEN);
+        client_id[MQTT_CLIENT_ID_MAX_LEN] = '\0';
+        return false;
+    }
+
+    strncpy(client_id, cfg.mqtt_client_id, MQTT_CLIENT_ID_MAX_LEN);
+    client_id[MQTT_CLIENT_ID_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_mqtt_client_id(const char *client_id)
+{
+    if (client_id == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(client_id);
+    if (len > MQTT_CLIENT_ID_MAX_LEN) {
+        printf("MQTT client ID too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.mqtt_client_id, 0, sizeof(cfg.mqtt_client_id));
+    if (len > 0) {
+        strncpy(cfg.mqtt_client_id, client_id, MQTT_CLIENT_ID_MAX_LEN);
+        cfg.settings_flags |= SETTINGS_FLAG_MQTT_CLIENT_ID;
+    } else {
+        cfg.settings_flags &= ~SETTINGS_FLAG_MQTT_CLIENT_ID;
+    }
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("MQTT client ID %s\r\n", len > 0 ? "saved" : "cleared (using hostname)");
     return true;
 }

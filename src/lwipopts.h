@@ -90,9 +90,11 @@
 #define MQTT_DEBUG                  LWIP_DBG_OFF
 #define ALTCP_MBEDTLS_MEM_DEBUG     LWIP_DBG_OFF
 
+// ALTCP required for MQTT library
 #define LWIP_ALTCP               1
-#define LWIP_ALTCP_TLS           1
-#define LWIP_ALTCP_TLS_MBEDTLS   1
+// TLS disabled - not needed for plain MQTT
+#define LWIP_ALTCP_TLS           0
+#define LWIP_ALTCP_TLS_MBEDTLS   0
 #define MEMP_NUM_SYS_TIMEOUT     LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1
 
 // HTTP server options

@@ -15,6 +15,7 @@ no extra software on the target system.
 - Web interface with virtual keyboard, mouse and touch support
 - HTTP API for automation
 - UDP for low(ish) latency clients
+- MQTT for home automation integration
 
 ## Possible use cases
 
@@ -43,6 +44,21 @@ The web UI provides:
 - Media keys (play/pause, volume, etc.)
 
 For programmatic control, see the [API specification](openapi.yaml).
+
+## MQTT
+
+Configure via Settings in the web UI. The device subscribes to `{topic}/#`.
+
+**Topics:**
+- `{topic}/key` - Keyboard: `{"key": "a"}` or `{"key": "ENTER", "down": true}`
+- `{topic}/mouse/move` - Move: `{"x": 10, "y": -5}`
+- `{topic}/mouse/button` - Click: `{"button": "left", "down": true}`
+- `{topic}/scroll` - Scroll: `{"x": 0, "y": -3}`
+- `{topic}/release` - Release all keys
+
+Key names: `a`-`z`, `0`-`9`, `ENTER`, `ESCAPE`, `TAB`, `SPACE`, `BACKSPACE`, `DELETE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `F1`-`F12`, `CTRL`, `SHIFT`, `ALT`, `GUI`, `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`, `PLAY_PAUSE`, etc.
+
+Omit `down` field for tap (press + release). Use `down: true` for press, `down: false` for release.
 
 ## Building
 

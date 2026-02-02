@@ -22,21 +22,22 @@
 #include "ap_mode.h"
 #include "wifi_scan.h"
 #include "usb.h"
+#include "cjson/cJSON.h"
 
 //--------------------------------------------------------------------+
 // State
 //--------------------------------------------------------------------+
 
-// Response buffer for dynamic API responses
-static char api_response[512];
+// Response buffer for dynamic API responses (larger for MQTT settings)
+static char api_response[768];
 
 // Uptime counter
 static uint32_t uptime_seconds = 0;
 static uint32_t last_uptime_update = 0;
 
-// POST request handling
+// POST request handling (larger buffer for MQTT settings)
 static char post_uri[64];
-static char post_body[256];
+static char post_body[512];
 static size_t post_body_len = 0;
 
 // Config API state
@@ -67,66 +68,6 @@ static void update_uptime(void)
     }
 }
 
-// Escape a string for JSON (handles quotes and backslashes)
-static void escape_json_string(const char *src, char *dst, size_t dst_size)
-{
-    size_t j = 0;
-    for (size_t i = 0; src[i] != '\0' && j < dst_size - 1; i++) {
-        char c = src[i];
-        if (c == '"' || c == '\\') {
-            if (j + 2 >= dst_size) break;
-            dst[j++] = '\\';
-        }
-        dst[j++] = c;
-    }
-    dst[j] = '\0';
-}
-
-// Find string value in JSON: {"key":"value"} -> returns pointer to value, sets len
-static const char *json_find_string(const char *json, const char *key, size_t *value_len)
-{
-    char search_key[64];
-    snprintf(search_key, sizeof(search_key), "\"%s\":\"", key);
-
-    const char *start = strstr(json, search_key);
-    if (!start) {
-        return NULL;
-    }
-
-    start += strlen(search_key);
-    const char *end = strchr(start, '"');
-    if (!end) {
-        return NULL;
-    }
-
-    *value_len = end - start;
-    return start;
-}
-
-// Find integer value in JSON: {"key":123}
-static bool json_find_int(const char *json, const char *key, int *value)
-{
-    char search_key[64];
-    snprintf(search_key, sizeof(search_key), "\"%s\":", key);
-
-    const char *start = strstr(json, search_key);
-    if (!start) {
-        return false;
-    }
-
-    start += strlen(search_key);
-    while (*start == ' ' || *start == '\t') start++;
-
-    char *end;
-    long val = strtol(start, &end, 10);
-    if (end == start) {
-        return false;
-    }
-
-    *value = (int)val;
-    return true;
-}
-
 // Map WiFi auth_mode to human-readable string
 static const char *auth_mode_to_string(uint8_t auth_mode)
 {
@@ -154,6 +95,52 @@ static void api_json_response(struct fs_file *file, const char *body, int body_l
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
 }
 
+// Send cJSON object as response (frees the cJSON object)
+static void api_cjson_response(struct fs_file *file, cJSON *json)
+{
+    char *body = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+
+    if (body) {
+        api_json_response(file, body, strlen(body));
+        cJSON_free(body);
+    } else {
+        api_json_response(file, "{\"error\":\"json serialization failed\"}", 38);
+    }
+}
+
+// Helper to get string from cJSON object (returns NULL if not found or not string)
+static const char *cjson_get_string(cJSON *json, const char *key)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(json, key);
+    if (cJSON_IsString(item) && item->valuestring != NULL) {
+        return item->valuestring;
+    }
+    return NULL;
+}
+
+// Helper to get int from cJSON object (returns false if not found or not number)
+static bool cjson_get_int(cJSON *json, const char *key, int *value)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(json, key);
+    if (cJSON_IsNumber(item)) {
+        *value = item->valueint;
+        return true;
+    }
+    return false;
+}
+
+// Helper to get bool from cJSON object (returns false if not found)
+static bool cjson_get_bool(cJSON *json, const char *key, bool *value)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(json, key);
+    if (cJSON_IsBool(item)) {
+        *value = cJSON_IsTrue(item);
+        return true;
+    }
+    return false;
+}
+
 //--------------------------------------------------------------------+
 // Device/Config API Handlers
 //--------------------------------------------------------------------+
@@ -174,24 +161,27 @@ static int handle_api_status(struct fs_file *file)
     char hostname[HOSTNAME_MAX_LEN + 1];
     settings_get_hostname(hostname);
 
-    char body[256];
-    int body_len = snprintf(body, sizeof(body),
-        "{\"hostname\":\"%s\",\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"ip\":\"%s\",\"uptime\":%lu,\"mode\":\"%s\"}",
-        hostname,
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-        ip_str,
-        (unsigned long)uptime_seconds,
-        in_ap_mode ? "ap" : "sta");
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    api_json_response(file, body, body_len);
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "hostname", hostname);
+    cJSON_AddStringToObject(json, "mac", mac_str);
+    cJSON_AddStringToObject(json, "ip", ip_str);
+    cJSON_AddNumberToObject(json, "uptime", uptime_seconds);
+    cJSON_AddStringToObject(json, "mode", in_ap_mode ? "ap" : "sta");
+
+    api_cjson_response(file, json);
     return 1;
 }
 
 // POST /api/reboot-ap result
 static int handle_api_reboot_ap_result(struct fs_file *file)
 {
-    char body[] = "{\"status\":\"rebooting to AP mode\"}";
-    api_json_response(file, body, strlen(body));
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "status", "rebooting to AP mode");
+    api_cjson_response(file, json);
     settings_set_force_ap();
     watchdog_enable(100, false);
     return 1;
@@ -200,8 +190,9 @@ static int handle_api_reboot_ap_result(struct fs_file *file)
 // POST /api/reboot result
 static int handle_api_reboot_result(struct fs_file *file)
 {
-    char body[] = "{\"status\":\"rebooting\"}";
-    api_json_response(file, body, strlen(body));
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "status", "rebooting");
+    api_cjson_response(file, json);
     watchdog_enable(100, false);
     return 1;
 }
@@ -209,37 +200,31 @@ static int handle_api_reboot_result(struct fs_file *file)
 // GET /api/config - stored WiFi config (SSID only)
 static int handle_api_config_get(struct fs_file *file)
 {
-    char body[128];
-    int body_len;
-
     char ssid[WIFI_SSID_MAX_LEN + 1];
-    if (wifi_credentials_get_ssid(ssid)) {
-        body_len = snprintf(body, sizeof(body),
-            "{\"configured\":true,\"ssid\":\"%s\"}", ssid);
-    } else {
-        body_len = snprintf(body, sizeof(body),
-            "{\"configured\":false,\"ssid\":\"\"}");
-    }
+    bool configured = wifi_credentials_get_ssid(ssid);
 
-    api_json_response(file, body, body_len);
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "configured", configured);
+    cJSON_AddStringToObject(json, "ssid", configured ? ssid : "");
+
+    api_cjson_response(file, json);
     return 1;
 }
 
 // POST /api/config result
 static int handle_api_config_post_result(struct fs_file *file)
 {
-    char body[64];
-    int body_len;
+    cJSON *json = cJSON_CreateObject();
 
     if (post_config_success) {
-        body_len = snprintf(body, sizeof(body),
-            "{\"status\":\"saved\",\"rebooting\":true}");
+        cJSON_AddStringToObject(json, "status", "saved");
+        cJSON_AddBoolToObject(json, "rebooting", true);
     } else {
-        body_len = snprintf(body, sizeof(body),
-            "{\"status\":\"error\",\"message\":\"invalid request\"}");
+        cJSON_AddStringToObject(json, "status", "error");
+        cJSON_AddStringToObject(json, "message", "invalid request");
     }
 
-    api_json_response(file, body, body_len);
+    api_cjson_response(file, json);
 
     if (post_config_success) {
         watchdog_enable(100, false);
@@ -252,48 +237,36 @@ static int handle_api_networks(struct fs_file *file)
 {
     const wifi_scan_state_t *scan = wifi_scan_get_results();
 
-    char body[400];
-    int pos = 0;
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "scanning", scan->scanning);
 
-    pos += snprintf(body + pos, sizeof(body) - pos,
-        "{\"scanning\":%s,\"networks\":[",
-        scan->scanning ? "true" : "false");
-
-    for (int i = 0; i < scan->count && pos < (int)sizeof(body) - 80; i++) {
-        if (i > 0) {
-            body[pos++] = ',';
-        }
-
-        char escaped_ssid[65];
-        escape_json_string(scan->networks[i].ssid, escaped_ssid, sizeof(escaped_ssid));
-
-        pos += snprintf(body + pos, sizeof(body) - pos,
-            "{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":\"%s\",\"ch\":%d}",
-            escaped_ssid,
-            scan->networks[i].rssi,
-            auth_mode_to_string(scan->networks[i].auth_mode),
-            scan->networks[i].channel);
+    cJSON *networks = cJSON_AddArrayToObject(json, "networks");
+    for (int i = 0; i < scan->count; i++) {
+        cJSON *network = cJSON_CreateObject();
+        cJSON_AddStringToObject(network, "ssid", scan->networks[i].ssid);
+        cJSON_AddNumberToObject(network, "rssi", scan->networks[i].rssi);
+        cJSON_AddStringToObject(network, "auth", auth_mode_to_string(scan->networks[i].auth_mode));
+        cJSON_AddNumberToObject(network, "ch", scan->networks[i].channel);
+        cJSON_AddItemToArray(networks, network);
     }
 
-    pos += snprintf(body + pos, sizeof(body) - pos, "]}");
-
-    api_json_response(file, body, pos);
+    api_cjson_response(file, json);
     return 1;
 }
 
 // POST /api/scan result
 static int handle_api_scan_result(struct fs_file *file)
 {
-    char body[64];
-    int body_len;
+    cJSON *json = cJSON_CreateObject();
 
     if (scan_triggered) {
-        body_len = snprintf(body, sizeof(body), "{\"status\":\"scanning\"}");
+        cJSON_AddStringToObject(json, "status", "scanning");
     } else {
-        body_len = snprintf(body, sizeof(body), "{\"status\":\"error\",\"message\":\"scan failed\"}");
+        cJSON_AddStringToObject(json, "status", "error");
+        cJSON_AddStringToObject(json, "message", "scan failed");
     }
 
-    api_json_response(file, body, body_len);
+    api_cjson_response(file, json);
     return 1;
 }
 
@@ -301,66 +274,162 @@ static int handle_api_scan_result(struct fs_file *file)
 // Settings API Handlers
 //--------------------------------------------------------------------+
 
-// GET /api/settings - device settings
+// GET /api/settings - all device settings
 static int handle_api_settings_get(struct fs_file *file)
 {
-    char hostname[HOSTNAME_MAX_LEN + 1];
-    bool is_default = !settings_get_hostname(hostname);
+    // Hostname
+    char hostname_buf[HOSTNAME_MAX_LEN + 1];
+    bool hostname_is_default = !settings_get_hostname(hostname_buf);
 
-    char escaped_hostname[HOSTNAME_MAX_LEN * 2 + 1];
-    escape_json_string(hostname, escaped_hostname, sizeof(escaped_hostname));
+    // MQTT settings
+    char mqtt_broker[MQTT_BROKER_MAX_LEN + 1];
+    char mqtt_topic[MQTT_TOPIC_MAX_LEN + 1];
+    char mqtt_username[MQTT_USERNAME_MAX_LEN + 1];
+    char mqtt_client_id[MQTT_CLIENT_ID_MAX_LEN + 1];
 
-    char body[256];
-    int body_len = snprintf(body, sizeof(body),
-        "{\"hostname\":{\"value\":\"%s\",\"default\":%s}}",
-        escaped_hostname,
-        is_default ? "true" : "false");
+    bool has_broker = settings_get_mqtt_broker(mqtt_broker);
+    bool has_topic = settings_get_mqtt_topic(mqtt_topic);
+    bool has_username = settings_get_mqtt_username(mqtt_username);
+    bool mqtt_has_pass = settings_mqtt_has_password();
+    settings_get_mqtt_client_id(mqtt_client_id);
 
-    api_json_response(file, body, body_len);
+    bool mqtt_enabled = settings_get_mqtt_enabled();
+    uint16_t mqtt_port = settings_get_mqtt_port();
+
+    cJSON *json = cJSON_CreateObject();
+
+    // Hostname as nested object
+    cJSON *hostname_obj = cJSON_AddObjectToObject(json, "hostname");
+    cJSON_AddStringToObject(hostname_obj, "value", hostname_buf);
+    cJSON_AddBoolToObject(hostname_obj, "default", hostname_is_default);
+
+    // MQTT settings
+    cJSON_AddBoolToObject(json, "mqtt_enabled", mqtt_enabled);
+    cJSON_AddStringToObject(json, "mqtt_broker", has_broker ? mqtt_broker : "");
+    cJSON_AddNumberToObject(json, "mqtt_port", mqtt_port);
+    cJSON_AddStringToObject(json, "mqtt_topic", has_topic ? mqtt_topic : "");
+    cJSON_AddStringToObject(json, "mqtt_username", has_username ? mqtt_username : "");
+    cJSON_AddBoolToObject(json, "mqtt_has_password", mqtt_has_pass);
+    cJSON_AddStringToObject(json, "mqtt_client_id", mqtt_client_id);
+
+    api_cjson_response(file, json);
     return 1;
 }
 
 // POST /api/settings result
 static int handle_api_settings_result(struct fs_file *file)
 {
-    char body[128];
-    int body_len;
+    cJSON *json = cJSON_CreateObject();
 
     if (settings_api_success) {
-        body_len = snprintf(body, sizeof(body), "{\"success\":true}");
+        cJSON_AddBoolToObject(json, "success", true);
     } else {
-        char escaped_error[64];
-        escape_json_string(settings_api_error, escaped_error, sizeof(escaped_error));
-        body_len = snprintf(body, sizeof(body),
-            "{\"success\":false,\"error\":\"%s\"}", escaped_error);
+        cJSON_AddBoolToObject(json, "success", false);
+        cJSON_AddStringToObject(json, "error", settings_api_error);
     }
 
-    api_json_response(file, body, body_len);
+    api_cjson_response(file, json);
     return 1;
 }
 
 // Process POST /api/settings
 static void process_settings_post(void)
 {
-    size_t hostname_len = 0;
-    const char *hostname = json_find_string(post_body, "hostname", &hostname_len);
+    cJSON *json = cJSON_Parse(post_body);
+    if (json == NULL) {
+        snprintf(settings_api_error, sizeof(settings_api_error), "Invalid JSON");
+        return;
+    }
 
-    if (hostname && hostname_len > 0) {
-        if (hostname_len > HOSTNAME_MAX_LEN) {
+    // Hostname
+    const char *hostname = cjson_get_string(json, "hostname");
+    if (hostname && strlen(hostname) > 0) {
+        if (strlen(hostname) > HOSTNAME_MAX_LEN) {
             snprintf(settings_api_error, sizeof(settings_api_error), "Hostname too long");
+            cJSON_Delete(json);
             return;
         }
-
-        char hostname_buf[HOSTNAME_MAX_LEN + 1];
-        memcpy(hostname_buf, hostname, hostname_len);
-        hostname_buf[hostname_len] = '\0';
-
-        if (!settings_set_hostname(hostname_buf)) {
+        if (!settings_set_hostname(hostname)) {
             snprintf(settings_api_error, sizeof(settings_api_error), "Invalid hostname format");
+            cJSON_Delete(json);
             return;
         }
     }
 
+    // MQTT enabled
+    bool mqtt_enabled;
+    if (cjson_get_bool(json, "mqtt_enabled", &mqtt_enabled)) {
+        settings_set_mqtt_enabled(mqtt_enabled);
+    }
+
+    // MQTT port
+    int mqtt_port;
+    if (cjson_get_int(json, "mqtt_port", &mqtt_port)) {
+        if (mqtt_port > 0 && mqtt_port <= 65535) {
+            settings_set_mqtt_port((uint16_t)mqtt_port);
+        } else {
+            snprintf(settings_api_error, sizeof(settings_api_error), "Invalid MQTT port");
+            cJSON_Delete(json);
+            return;
+        }
+    }
+
+    // MQTT broker
+    const char *broker = cjson_get_string(json, "mqtt_broker");
+    if (broker) {
+        if (strlen(broker) > MQTT_BROKER_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "MQTT broker too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_mqtt_broker(broker);
+    }
+
+    // MQTT topic
+    const char *topic = cjson_get_string(json, "mqtt_topic");
+    if (topic) {
+        if (strlen(topic) > MQTT_TOPIC_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "MQTT topic too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_mqtt_topic(topic);
+    }
+
+    // MQTT username
+    const char *username = cjson_get_string(json, "mqtt_username");
+    if (username) {
+        if (strlen(username) > MQTT_USERNAME_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "MQTT username too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_mqtt_username(username);
+    }
+
+    // MQTT password
+    const char *password = cjson_get_string(json, "mqtt_password");
+    if (password) {
+        if (strlen(password) > MQTT_PASSWORD_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "MQTT password too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_mqtt_password(password);
+    }
+
+    // MQTT client ID
+    const char *client_id = cjson_get_string(json, "mqtt_client_id");
+    if (client_id) {
+        if (strlen(client_id) > MQTT_CLIENT_ID_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "MQTT client ID too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_mqtt_client_id(client_id);
+    }
+
+    cJSON_Delete(json);
     settings_api_success = true;
 }
 
@@ -371,44 +440,48 @@ static void process_settings_post(void)
 // POST /api/hid/* result
 static int handle_api_hid_result(struct fs_file *file)
 {
-    char body[128];
-    int body_len;
+    cJSON *json = cJSON_CreateObject();
 
     if (hid_api_success) {
-        body_len = snprintf(body, sizeof(body), "{\"success\":true}");
+        cJSON_AddBoolToObject(json, "success", true);
     } else {
-        char escaped_error[64];
-        escape_json_string(hid_api_error, escaped_error, sizeof(escaped_error));
-        body_len = snprintf(body, sizeof(body),
-            "{\"success\":false,\"error\":\"%s\"}", escaped_error);
+        cJSON_AddBoolToObject(json, "success", false);
+        cJSON_AddStringToObject(json, "error", hid_api_error);
     }
 
-    api_json_response(file, body, body_len);
+    api_cjson_response(file, json);
     return 1;
 }
 
 // Process POST /api/hid/key
 static void process_hid_key(void)
 {
-    size_t action_len = 0;
-    const char *action_str = json_find_string(post_body, "action", &action_len);
-
-    int hid_code;
-    if (!json_find_int(post_body, "code", &hid_code) || hid_code < 0 || hid_code > 255) {
-        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid or missing code");
+    cJSON *json = cJSON_Parse(post_body);
+    if (json == NULL) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid JSON");
         return;
     }
+
+    int hid_code;
+    if (!cjson_get_int(json, "code", &hid_code) || hid_code < 0 || hid_code > 255) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid or missing code");
+        cJSON_Delete(json);
+        return;
+    }
+
+    const char *action = cjson_get_string(json, "action");
 
     bool do_press = true;
     bool do_release = true;
 
-    if (action_str && action_len > 0) {
-        if (strncmp(action_str, "press", action_len) == 0) {
+    if (action != NULL) {
+        if (strcmp(action, "press") == 0) {
             do_release = false;
-        } else if (strncmp(action_str, "release", action_len) == 0) {
+        } else if (strcmp(action, "release") == 0) {
             do_press = false;
-        } else if (strncmp(action_str, "tap", action_len) != 0) {
+        } else if (strcmp(action, "tap") != 0) {
             snprintf(hid_api_error, sizeof(hid_api_error), "Invalid action");
+            cJSON_Delete(json);
             return;
         }
     }
@@ -416,16 +489,22 @@ static void process_hid_key(void)
     if (do_press) press_key(hid_code);
     if (do_release) depress_key(hid_code);
 
+    cJSON_Delete(json);
     hid_api_success = true;
 }
 
 // Process POST /api/hid/mouse/move
 static void process_hid_mouse_move(void)
 {
-    int dx = 0, dy = 0;
+    cJSON *json = cJSON_Parse(post_body);
+    if (json == NULL) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid JSON");
+        return;
+    }
 
-    json_find_int(post_body, "dx", &dx);
-    json_find_int(post_body, "dy", &dy);
+    int dx = 0, dy = 0;
+    cjson_get_int(json, "dx", &dx);
+    cjson_get_int(json, "dy", &dy);
 
     if (dx < -127) dx = -127;
     if (dx > 127) dx = 127;
@@ -433,31 +512,40 @@ static void process_hid_mouse_move(void)
     if (dy > 127) dy = 127;
 
     move_mouse(current_mouse_buttons, (int8_t)dx, (int8_t)dy, 0, 0);
+
+    cJSON_Delete(json);
     hid_api_success = true;
 }
 
 // Process POST /api/hid/mouse/button
 static void process_hid_mouse_button(void)
 {
-    size_t action_len = 0;
-    const char *action_str = json_find_string(post_body, "action", &action_len);
-
-    int button_bit;
-    if (!json_find_int(post_body, "button", &button_bit) || button_bit < 1 || button_bit > 31) {
-        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid or missing button");
+    cJSON *json = cJSON_Parse(post_body);
+    if (json == NULL) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid JSON");
         return;
     }
+
+    int button_bit;
+    if (!cjson_get_int(json, "button", &button_bit) || button_bit < 1 || button_bit > 31) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid or missing button");
+        cJSON_Delete(json);
+        return;
+    }
+
+    const char *action = cjson_get_string(json, "action");
 
     bool do_press = true;
     bool do_release = true;
 
-    if (action_str && action_len > 0) {
-        if (strncmp(action_str, "press", action_len) == 0) {
+    if (action != NULL) {
+        if (strcmp(action, "press") == 0) {
             do_release = false;
-        } else if (strncmp(action_str, "release", action_len) == 0) {
+        } else if (strcmp(action, "release") == 0) {
             do_press = false;
-        } else if (strncmp(action_str, "click", action_len) != 0) {
+        } else if (strcmp(action, "click") != 0) {
             snprintf(hid_api_error, sizeof(hid_api_error), "Invalid action");
+            cJSON_Delete(json);
             return;
         }
     }
@@ -471,16 +559,22 @@ static void process_hid_mouse_button(void)
         move_mouse(current_mouse_buttons, 0, 0, 0, 0);
     }
 
+    cJSON_Delete(json);
     hid_api_success = true;
 }
 
 // Process POST /api/hid/mouse/scroll
 static void process_hid_mouse_scroll(void)
 {
-    int x = 0, y = 0;
+    cJSON *json = cJSON_Parse(post_body);
+    if (json == NULL) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid JSON");
+        return;
+    }
 
-    json_find_int(post_body, "x", &x);
-    json_find_int(post_body, "y", &y);
+    int x = 0, y = 0;
+    cjson_get_int(json, "x", &x);
+    cjson_get_int(json, "y", &y);
 
     if (x < -127) x = -127;
     if (x > 127) x = 127;
@@ -488,6 +582,8 @@ static void process_hid_mouse_scroll(void)
     if (y > 127) y = 127;
 
     move_mouse(current_mouse_buttons, 0, 0, (int8_t)y, (int8_t)x);
+
+    cJSON_Delete(json);
     hid_api_success = true;
 }
 
@@ -672,32 +768,30 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_ur
 
     // Handle /api/config
     if (strcmp(post_uri, "/api/config") == 0) {
-        size_t ssid_len = 0, pass_len = 0;
-        const char *ssid = json_find_string(post_body, "ssid", &ssid_len);
-        const char *pass = json_find_string(post_body, "password", &pass_len);
+        cJSON *json = cJSON_Parse(post_body);
+        if (json == NULL) {
+            printf("POST /api/config: failed to parse JSON\r\n");
+            snprintf(response_uri, response_uri_len, "/api/config/result");
+            return;
+        }
 
-        if (ssid && pass && ssid_len > 0 && ssid_len <= WIFI_SSID_MAX_LEN &&
-            pass_len <= WIFI_PASSWORD_MAX_LEN) {
+        const char *ssid = cjson_get_string(json, "ssid");
+        const char *pass = cjson_get_string(json, "password");
 
-            char ssid_buf[WIFI_SSID_MAX_LEN + 1];
-            char pass_buf[WIFI_PASSWORD_MAX_LEN + 1];
+        if (ssid && pass && strlen(ssid) > 0 && strlen(ssid) <= WIFI_SSID_MAX_LEN &&
+            strlen(pass) <= WIFI_PASSWORD_MAX_LEN) {
 
-            memcpy(ssid_buf, ssid, ssid_len);
-            ssid_buf[ssid_len] = '\0';
-
-            memcpy(pass_buf, pass, pass_len);
-            pass_buf[pass_len] = '\0';
-
-            if (wifi_credentials_set(ssid_buf, pass_buf)) {
+            if (wifi_credentials_set(ssid, pass)) {
                 post_config_success = true;
                 printf("POST /api/config: credentials saved\r\n");
             } else {
                 printf("POST /api/config: failed to save credentials\r\n");
             }
         } else {
-            printf("POST /api/config: invalid JSON (ssid=%p/%zu, pass=%p/%zu)\r\n",
-                   ssid, ssid_len, pass, pass_len);
+            printf("POST /api/config: invalid JSON fields\r\n");
         }
+
+        cJSON_Delete(json);
         snprintf(response_uri, response_uri_len, "/api/config/result");
         return;
     }

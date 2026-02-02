@@ -36,8 +36,23 @@
 // Device settings limits
 #define HOSTNAME_MAX_LEN 32
 
+// MQTT settings limits
+#define MQTT_BROKER_MAX_LEN 63
+#define MQTT_TOPIC_MAX_LEN 63
+#define MQTT_USERNAME_MAX_LEN 31
+#define MQTT_PASSWORD_MAX_LEN 63
+#define MQTT_CLIENT_ID_MAX_LEN 31
+#define MQTT_DEFAULT_PORT 1883
+
 // Settings flags bitfield
-#define SETTINGS_FLAG_HOSTNAME (1 << 0)
+#define SETTINGS_FLAG_HOSTNAME       (1 << 0)
+#define SETTINGS_FLAG_MQTT_BROKER    (1 << 1)
+#define SETTINGS_FLAG_MQTT_PORT      (1 << 2)
+#define SETTINGS_FLAG_MQTT_TOPIC     (1 << 3)
+#define SETTINGS_FLAG_MQTT_USER      (1 << 4)
+#define SETTINGS_FLAG_MQTT_PASS      (1 << 5)
+#define SETTINGS_FLAG_MQTT_ENABLED   (1 << 6)
+#define SETTINGS_FLAG_MQTT_CLIENT_ID (1 << 7)
 
 //--------------------------------------------------------------------+
 // Force AP Mode Flag
@@ -87,5 +102,64 @@ bool settings_set_hostname(const char *hostname);
 
 // Check if hostname is the auto-generated default
 bool settings_hostname_is_default(void);
+
+//--------------------------------------------------------------------+
+// MQTT Settings
+//--------------------------------------------------------------------+
+
+// Check if MQTT is enabled
+bool settings_get_mqtt_enabled(void);
+
+// Enable/disable MQTT
+bool settings_set_mqtt_enabled(bool enabled);
+
+// Get MQTT broker hostname/IP
+// broker buffer must be at least MQTT_BROKER_MAX_LEN+1 bytes
+// Returns true if configured, false if not set
+bool settings_get_mqtt_broker(char *broker);
+
+// Set MQTT broker hostname/IP
+bool settings_set_mqtt_broker(const char *broker);
+
+// Get MQTT port (returns default 1883 if not configured)
+uint16_t settings_get_mqtt_port(void);
+
+// Set MQTT port
+bool settings_set_mqtt_port(uint16_t port);
+
+// Get MQTT topic
+// topic buffer must be at least MQTT_TOPIC_MAX_LEN+1 bytes
+// Returns true if configured, false if not set
+bool settings_get_mqtt_topic(char *topic);
+
+// Set MQTT topic
+bool settings_set_mqtt_topic(const char *topic);
+
+// Get MQTT username (optional)
+// username buffer must be at least MQTT_USERNAME_MAX_LEN+1 bytes
+// Returns true if configured, false if not set
+bool settings_get_mqtt_username(char *username);
+
+// Set MQTT username (empty string to clear)
+bool settings_set_mqtt_username(const char *username);
+
+// Get MQTT password (optional)
+// password buffer must be at least MQTT_PASSWORD_MAX_LEN+1 bytes
+// Returns true if configured, false if not set
+bool settings_get_mqtt_password(char *password);
+
+// Set MQTT password (empty string to clear)
+bool settings_set_mqtt_password(const char *password);
+
+// Check if MQTT password is set (without exposing it)
+bool settings_mqtt_has_password(void);
+
+// Get MQTT client ID (optional, defaults to hostname if not set)
+// client_id buffer must be at least MQTT_CLIENT_ID_MAX_LEN+1 bytes
+// Returns true if configured, false if using default (hostname)
+bool settings_get_mqtt_client_id(char *client_id);
+
+// Set MQTT client ID (empty string to use hostname as default)
+bool settings_set_mqtt_client_id(const char *client_id);
 
 #endif

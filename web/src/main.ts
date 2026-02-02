@@ -48,6 +48,23 @@ interface SettingsResponse {
         value: string;
         default: boolean;
     };
+    mqtt_enabled: boolean;
+    mqtt_broker: string;
+    mqtt_port: number;
+    mqtt_topic: string;
+    mqtt_username: string;
+    mqtt_has_password: boolean;
+    mqtt_client_id: string;
+}
+
+interface MqttSettings {
+    mqtt_enabled?: boolean;
+    mqtt_broker?: string;
+    mqtt_port?: number;
+    mqtt_topic?: string;
+    mqtt_username?: string;
+    mqtt_password?: string;
+    mqtt_client_id?: string;
 }
 
 // Global state
@@ -119,7 +136,7 @@ async function fetchSettings(): Promise<SettingsResponse | null> {
     }
 }
 
-async function saveSettings(settings: { hostname?: string }): Promise<{ success: boolean; error?: string }> {
+async function saveSettings(settings: { hostname?: string } & MqttSettings): Promise<{ success: boolean; error?: string }> {
     try {
         const response = await fetch("/api/settings", {
             method: "POST",
@@ -439,6 +456,70 @@ async function renderSettingsPage(): Promise<void> {
                     <p class="form-hint hostname-hint">Letters, numbers, and hyphens only (1-32 chars)</p>
                 </div>
 
+                <div class="settings-section">
+                    <h2>MQTT</h2>
+
+                    <div class="form-group form-group-checkbox">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="mqtt-enabled" ${settings.mqtt_enabled ? "checked" : ""}>
+                            <span>Enable MQTT</span>
+                        </label>
+                    </div>
+
+                    <div class="mqtt-fields" id="mqtt-fields">
+                        <div class="form-group">
+                            <label for="mqtt-broker">Broker</label>
+                            <input type="text" id="mqtt-broker"
+                                   value="${escapeHtml(settings.mqtt_broker)}"
+                                   maxlength="63"
+                                   placeholder="mqtt.example.com">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="mqtt-port">Port</label>
+                                <input type="number" id="mqtt-port"
+                                       value="${settings.mqtt_port}"
+                                       min="1" max="65535"
+                                       placeholder="1883">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mqtt-topic">Topic</label>
+                            <input type="text" id="mqtt-topic"
+                                   value="${escapeHtml(settings.mqtt_topic)}"
+                                   maxlength="63"
+                                   placeholder="nethid/device1">
+                            <p class="form-hint">Device subscribes to {topic}/#</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mqtt-username">Username <span class="optional">(optional)</span></label>
+                            <input type="text" id="mqtt-username"
+                                   value="${escapeHtml(settings.mqtt_username)}"
+                                   maxlength="31"
+                                   placeholder="Leave empty for no auth">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mqtt-password">Password <span class="optional">(optional)</span></label>
+                            <input type="password" id="mqtt-password"
+                                   maxlength="63"
+                                   placeholder="${settings.mqtt_has_password ? '(unchanged)' : 'Leave empty for no auth'}">
+                            ${settings.mqtt_has_password ? '<p class="form-hint">Leave empty to keep existing password</p>' : ''}
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mqtt-client-id">Client ID <span class="optional">(optional)</span></label>
+                            <input type="text" id="mqtt-client-id"
+                                   value="${escapeHtml(settings.mqtt_client_id)}"
+                                   maxlength="31"
+                                   placeholder="Auto-generated from hostname">
+                        </div>
+                    </div>
+                </div>
+
                 <div id="settings-message" class="status-message"></div>
 
                 <button type="submit" id="save-btn" class="btn-primary">Save Settings</button>
@@ -464,6 +545,17 @@ async function renderSettingsPage(): Promise<void> {
         messageEl.textContent = "Device is rebooting. Please wait...";
     });
 
+    // MQTT enable/disable toggle
+    const mqttEnabledCheckbox = document.getElementById("mqtt-enabled") as HTMLInputElement;
+    const mqttFieldsDiv = document.getElementById("mqtt-fields") as HTMLDivElement;
+
+    function updateMqttFieldsVisibility(): void {
+        mqttFieldsDiv.style.display = mqttEnabledCheckbox.checked ? "block" : "none";
+    }
+
+    mqttEnabledCheckbox?.addEventListener("change", updateMqttFieldsVisibility);
+    updateMqttFieldsVisibility();
+
     // Form submission
     document.getElementById("settings-form")?.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -478,11 +570,55 @@ async function renderSettingsPage(): Promise<void> {
             return;
         }
 
+        // Gather MQTT settings
+        const mqttEnabled = (document.getElementById("mqtt-enabled") as HTMLInputElement).checked;
+        const mqttBroker = (document.getElementById("mqtt-broker") as HTMLInputElement).value.trim();
+        const mqttPort = parseInt((document.getElementById("mqtt-port") as HTMLInputElement).value) || 1883;
+        const mqttTopic = (document.getElementById("mqtt-topic") as HTMLInputElement).value.trim();
+        const mqttUsername = (document.getElementById("mqtt-username") as HTMLInputElement).value.trim();
+        const mqttPassword = (document.getElementById("mqtt-password") as HTMLInputElement).value;
+        const mqttClientId = (document.getElementById("mqtt-client-id") as HTMLInputElement).value.trim();
+
+        // Validate MQTT settings if enabled
+        if (mqttEnabled) {
+            if (!mqttBroker) {
+                messageEl.textContent = "MQTT broker is required when MQTT is enabled";
+                messageEl.className = "status-message status-error";
+                return;
+            }
+            if (!mqttTopic) {
+                messageEl.textContent = "MQTT topic is required when MQTT is enabled";
+                messageEl.className = "status-message status-error";
+                return;
+            }
+            if (mqttPort < 1 || mqttPort > 65535) {
+                messageEl.textContent = "MQTT port must be between 1 and 65535";
+                messageEl.className = "status-message status-error";
+                return;
+            }
+        }
+
         // Show saving status
         messageEl.textContent = "Saving...";
         messageEl.className = "status-message status-info";
 
-        const result = await saveSettings({ hostname });
+        // Build settings object
+        const settingsToSave: { hostname: string } & MqttSettings = {
+            hostname,
+            mqtt_enabled: mqttEnabled,
+            mqtt_broker: mqttBroker,
+            mqtt_port: mqttPort,
+            mqtt_topic: mqttTopic,
+            mqtt_username: mqttUsername,
+            mqtt_client_id: mqttClientId,
+        };
+
+        // Only include password if it was changed (not empty)
+        if (mqttPassword) {
+            settingsToSave.mqtt_password = mqttPassword;
+        }
+
+        const result = await saveSettings(settingsToSave);
 
         if (result.success) {
             messageEl.textContent = "Settings saved! Changes take effect after reboot.";

@@ -36,6 +36,7 @@
 #include "config.h"
 #include "httpd/httpd.h"
 #include "websocket/websocket.h"
+#include "mqtt/mqtt.h"
 #include "settings.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
@@ -182,6 +183,7 @@ int main()
         // check wifi status (only in STA mode)
         if (!in_ap_mode) {
             wifi_task();
+            mqtt_task();
         }
 
         // check BOOTSEL button for AP mode trigger
@@ -330,6 +332,9 @@ int setup_server()
 
     // Start WebSocket server for HID control
     websocket_init();
+
+    // Initialize MQTT client (will connect when enabled in settings)
+    mqtt_init();
 
     cyw43_arch_lwip_end();
 
