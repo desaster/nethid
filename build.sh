@@ -1,11 +1,9 @@
 #!/bin/sh
 #
-# To build, create a .env file with your WiFi credentials:
-#   WIFI_SSID=your_network
-#   WIFI_PASSWORD=your_password
+# Build script for NetHID
 #
-# Then run:
-#   ./build.sh
+# WiFi credentials are now stored in flash and configured via the web interface.
+# The device will start in AP mode if no credentials are configured.
 #
 # To build with docker, first build the docker image:
 #   docker build -t nethiddev:latest .
@@ -14,12 +12,6 @@
 #   USE_DOCKER=1 ./build.sh
 
 set -e
-
-# Load WiFi credentials from .env file if it exists
-if [ -f .env ]; then
-    . ./.env
-    export WIFI_SSID WIFI_PASSWORD
-fi
 
 USE_DOCKER="${USE_DOCKER:-0}"
 SKIP_WEB="${SKIP_WEB:-0}"
@@ -47,5 +39,5 @@ if [ ! "$USE_DOCKER" = "1" ] || [ -f /.dockerenv ]; then
     make -C build
 else
     echo ":: Running docker container"
-    docker run -it --rm -v $(pwd):/work -e WIFI_SSID="$WIFI_SSID" -e WIFI_PASSWORD="$WIFI_PASSWORD" nethiddev ./build.sh
+    docker run -it --rm -v $(pwd):/work nethiddev ./build.sh
 fi

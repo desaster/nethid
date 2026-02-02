@@ -47,6 +47,10 @@
 
 static struct udp_pcb *pcb;
 
+// Current WiFi credentials (loaded from flash at boot)
+static char current_wifi_ssid[WIFI_SSID_MAX_LEN + 1];
+static char current_wifi_password[WIFI_PASSWORD_MAX_LEN + 1];
+
 #define PACKET_TYPE_KEYBOARD 1
 #define PACKET_TYPE_MOUSE 2
 #define PACKET_TYPE_CONSUMER 3
@@ -115,6 +119,16 @@ int main()
         start_ap_mode = true;
     }
 
+    // Check if we have stored credentials
+    if (!start_ap_mode) {
+        if (!wifi_credentials_get(current_wifi_ssid, current_wifi_password)) {
+            printf("No WiFi credentials stored, starting AP mode for configuration\r\n");
+            start_ap_mode = true;
+        } else {
+            printf("Found stored WiFi credentials (SSID: %s)\r\n", current_wifi_ssid);
+        }
+    }
+
     if (start_ap_mode) {
         // Start in AP mode
         printf("Starting in AP mode\r\n");
@@ -134,8 +148,8 @@ int main()
         printf("setup_wifi()\r\n");
         if (setup_wifi(
                     CYW43_COUNTRY_FINLAND,
-                    WIFI_SSID,
-                    WIFI_PASSWORD,
+                    current_wifi_ssid,
+                    current_wifi_password,
                     CYW43_AUTH_WPA2_MIXED_PSK) != 0) {
             printf("Failed to connect to WiFi\n");
             return 1;
@@ -329,7 +343,7 @@ void wifi_task(void)
                 // Only reconnect if we were previously connected (not on initial boot)
                 if (prev_result == CYW43_LINK_UP) {
                     printf("Attempting to reconnect...\r\n");
-                    cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_MIXED_PSK);
+                    cyw43_arch_wifi_connect_async(current_wifi_ssid, current_wifi_password, CYW43_AUTH_WPA2_MIXED_PSK);
                 }
             }
             break;
@@ -357,7 +371,7 @@ void wifi_task(void)
                 // Attempt to reconnect on failure (but not if this is the initial attempt)
                 if (prev_result >= 0) {
                     printf("Attempting to reconnect...\r\n");
-                    cyw43_arch_wifi_connect_async(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_MIXED_PSK);
+                    cyw43_arch_wifi_connect_async(current_wifi_ssid, current_wifi_password, CYW43_AUTH_WPA2_MIXED_PSK);
                 }
             }
             break;

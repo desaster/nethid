@@ -25,6 +25,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 
 #include <pico/stdlib.h>
 #include <pico/cyw43_arch.h>
@@ -84,14 +85,17 @@ static bool __no_inline_not_in_flash_func(get_bootsel_button)(void)
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic value to identify valid config
-#define CONFIG_MAGIC 0x4E455448  // "NETH"
+// Magic value to identify valid config (version 2 with credentials)
+#define CONFIG_MAGIC 0x4E455432  // "NET2" (version 2)
 
 // Config structure stored in flash
 typedef struct {
     uint32_t magic;
     uint8_t force_ap_mode;
-    uint8_t reserved[3];
+    uint8_t has_credentials;     // 1 if SSID/password are valid
+    uint8_t reserved[2];
+    char wifi_ssid[WIFI_SSID_MAX_LEN + 1];      // null-terminated
+    char wifi_password[WIFI_PASSWORD_MAX_LEN + 1];  // null-terminated
     uint32_t checksum;
 } flash_config_t;
 
@@ -99,10 +103,16 @@ typedef struct {
 static char ap_ssid[32];
 static dhcp_server_t dhcp_server;
 
-// Calculate simple checksum
+// Calculate simple checksum over config data (excluding checksum field itself)
 static uint32_t calc_checksum(const flash_config_t *cfg)
 {
-    uint32_t sum = cfg->magic + cfg->force_ap_mode;
+    const uint8_t *data = (const uint8_t *)cfg;
+    // Sum all bytes except the checksum field at the end
+    size_t len = offsetof(flash_config_t, checksum);
+    uint32_t sum = 0;
+    for (size_t i = 0; i < len; i++) {
+        sum += data[i];
+    }
     return sum ^ 0xDEADBEEF;
 }
 
@@ -163,15 +173,17 @@ void ap_mode_clear_force_flag(void)
         if (cfg.force_ap_mode == 0) {
             return;  // Already cleared
         }
+        // Preserve existing credentials, just clear the flag
+        cfg.force_ap_mode = 0;
+    } else {
+        // No valid config, create a fresh one
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.magic = CONFIG_MAGIC;
+        cfg.force_ap_mode = 0;
+        cfg.has_credentials = 0;
     }
 
-    cfg.magic = CONFIG_MAGIC;
-    cfg.force_ap_mode = 0;
-    cfg.reserved[0] = 0;
-    cfg.reserved[1] = 0;
-    cfg.reserved[2] = 0;
     cfg.checksum = calc_checksum(&cfg);
-
     write_config(&cfg);
     printf("Force AP flag cleared\r\n");
 }
@@ -180,15 +192,114 @@ void ap_mode_set_force_flag(void)
 {
     flash_config_t cfg;
 
-    cfg.magic = CONFIG_MAGIC;
+    // Try to read existing config to preserve credentials
+    if (!read_config(&cfg)) {
+        // No valid config, create fresh
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.magic = CONFIG_MAGIC;
+        cfg.has_credentials = 0;
+    }
+
     cfg.force_ap_mode = 1;
-    cfg.reserved[0] = 0;
-    cfg.reserved[1] = 0;
-    cfg.reserved[2] = 0;
     cfg.checksum = calc_checksum(&cfg);
 
     write_config(&cfg);
     printf("Force AP flag set\r\n");
+}
+
+bool wifi_credentials_exist(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    return cfg.has_credentials != 0;
+}
+
+bool wifi_credentials_get(char *ssid, char *password)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    if (!cfg.has_credentials) {
+        return false;
+    }
+
+    // Copy credentials (already null-terminated in flash)
+    strncpy(ssid, cfg.wifi_ssid, WIFI_SSID_MAX_LEN);
+    ssid[WIFI_SSID_MAX_LEN] = '\0';
+
+    strncpy(password, cfg.wifi_password, WIFI_PASSWORD_MAX_LEN);
+    password[WIFI_PASSWORD_MAX_LEN] = '\0';
+
+    return true;
+}
+
+bool wifi_credentials_get_ssid(char *ssid)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    if (!cfg.has_credentials) {
+        return false;
+    }
+
+    strncpy(ssid, cfg.wifi_ssid, WIFI_SSID_MAX_LEN);
+    ssid[WIFI_SSID_MAX_LEN] = '\0';
+
+    return true;
+}
+
+bool wifi_credentials_set(const char *ssid, const char *password)
+{
+    flash_config_t cfg;
+
+    // Validate inputs
+    if (ssid == NULL || password == NULL) {
+        return false;
+    }
+
+    size_t ssid_len = strlen(ssid);
+    size_t pass_len = strlen(password);
+
+    if (ssid_len == 0 || ssid_len > WIFI_SSID_MAX_LEN) {
+        printf("Invalid SSID length: %zu\r\n", ssid_len);
+        return false;
+    }
+
+    if (pass_len > WIFI_PASSWORD_MAX_LEN) {
+        printf("Invalid password length: %zu\r\n", pass_len);
+        return false;
+    }
+
+    // Try to read existing config to preserve force_ap flag
+    if (!read_config(&cfg)) {
+        // No valid config, create fresh
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.magic = CONFIG_MAGIC;
+        cfg.force_ap_mode = 0;
+    }
+
+    // Store credentials
+    memset(cfg.wifi_ssid, 0, sizeof(cfg.wifi_ssid));
+    memset(cfg.wifi_password, 0, sizeof(cfg.wifi_password));
+    strncpy(cfg.wifi_ssid, ssid, WIFI_SSID_MAX_LEN);
+    strncpy(cfg.wifi_password, password, WIFI_PASSWORD_MAX_LEN);
+    cfg.has_credentials = 1;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("WiFi credentials saved (SSID: %s)\r\n", ssid);
+    return true;
 }
 
 int ap_mode_start(void)

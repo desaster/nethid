@@ -36,6 +36,10 @@
 // BOOTSEL hold time in milliseconds
 #define BOOTSEL_HOLD_TIME_MS 5000
 
+// WiFi credential limits (matching IEEE 802.11 standards)
+#define WIFI_SSID_MAX_LEN 32
+#define WIFI_PASSWORD_MAX_LEN 64
+
 // Check if "force AP" flag is set in flash
 bool ap_mode_check_force_flag(void);
 
@@ -44,6 +48,22 @@ void ap_mode_clear_force_flag(void);
 
 // Set the "force AP" flag in flash (called before reboot)
 void ap_mode_set_force_flag(void);
+
+// Check if valid WiFi credentials are stored in flash
+bool wifi_credentials_exist(void);
+
+// Get stored WiFi credentials
+// Returns true if valid credentials found, false otherwise
+// ssid buffer must be at least WIFI_SSID_MAX_LEN+1 bytes
+// password buffer must be at least WIFI_PASSWORD_MAX_LEN+1 bytes
+bool wifi_credentials_get(char *ssid, char *password);
+
+// Store WiFi credentials to flash
+// Returns true on success, false on failure
+bool wifi_credentials_set(const char *ssid, const char *password);
+
+// Get only the SSID (for status display, without exposing password)
+bool wifi_credentials_get_ssid(char *ssid);
 
 // Initialize and start AP mode with DHCP server
 int ap_mode_start(void);

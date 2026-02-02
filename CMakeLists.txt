@@ -5,16 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(TARGET nethid)
 
-set(WIFI_SSID "$ENV{WIFI_SSID}")
-set(WIFI_PASSWORD "$ENV{WIFI_PASSWORD}")
-
-if(NOT WIFI_SSID)
-  message(FATAL_ERROR "WIFI_SSID not set")
-endif()
-
-if(NOT WIFI_PASSWORD)
-  message(FATAL_ERROR "WIFI_PASSWORD not set")
-endif()
+# WiFi credentials are now stored in flash and configured via web interface.
+# The device will start in AP mode if no credentials are configured.
 
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
@@ -54,10 +46,6 @@ target_link_libraries(${TARGET}
 pico_add_extra_outputs(${TARGET})
 
 
-target_compile_definitions(${TARGET} PRIVATE
-    WIFI_SSID=\"${WIFI_SSID}\"
-    WIFI_PASSWORD=\"${WIFI_PASSWORD}\"
-    )
 
 add_compile_options(-Wall
     -Wno-unused-function
