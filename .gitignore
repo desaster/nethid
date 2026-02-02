@@ -4,3 +4,6 @@ compile_commands.json
 **/__pycache__
 .cache
 src/httpd/fsdata.c
+web/dist
+web/node_modules
+web/src/version.ts

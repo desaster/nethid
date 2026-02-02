@@ -171,6 +171,7 @@ static int handle_api_status(struct fs_file *file)
     cJSON_AddStringToObject(json, "ip", ip_str);
     cJSON_AddNumberToObject(json, "uptime", uptime_seconds);
     cJSON_AddStringToObject(json, "mode", in_ap_mode ? "ap" : "sta");
+    cJSON_AddStringToObject(json, "version", NETHID_VERSION);
 
     api_cjson_response(file, json);
     return 1;

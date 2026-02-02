@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(TARGET nethid)
 
+# Version string from build.sh (git describe)
+if(NOT DEFINED VERSION_STRING)
+    set(VERSION_STRING "unknown")
+endif()
+
 # WiFi credentials are now stored in flash and configured via web interface.
 # The device will start in AP mode if no credentials are configured.
 
@@ -58,4 +63,8 @@ add_compile_options(-Wall
 target_include_directories(${TARGET} PRIVATE
     $ENV{PICO_SDK_PATH}/lib/mbedtls/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+target_compile_definitions(${TARGET} PRIVATE
+    NETHID_VERSION="${VERSION_STRING}"
     )

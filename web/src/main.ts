@@ -23,6 +23,7 @@ interface DeviceStatus {
     ip: string;
     uptime: number;
     mode: "sta" | "ap";
+    version: string;
 }
 
 // HID client instance (shared)
@@ -211,6 +212,7 @@ function renderStatusPage(status: DeviceStatus): void {
                 <tr><th>IP</th><td>${status.ip}</td></tr>
                 <tr><th>Mode</th><td>Station</td></tr>
                 <tr><th>Uptime</th><td>${formatUptime(status.uptime)}</td></tr>
+                <tr><th>Version</th><td>${escapeHtml(status.version)}</td></tr>
             </table>
             <button id="control-btn" class="btn-primary" style="margin-top: 1.5rem; width: 100%;">
                 Open Remote Control
