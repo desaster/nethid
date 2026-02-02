@@ -28,6 +28,7 @@ add_executable(${TARGET}
     src/httpd/httpd.c
     src/ap_mode.c
     src/dhcpserver.c
+    src/wifi_scan.c
     #${PICO_SDK_PATH}/lib/lwip/src/apps/mqtt/mqtt.c
     )
 

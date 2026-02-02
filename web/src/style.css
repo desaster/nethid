@@ -103,3 +103,258 @@ button:hover {
         background: rgba(255, 255, 255, 0.1);
     }
 }
+
+/* Device info bar */
+.device-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    color: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+    .device-info {
+        color: #999;
+    }
+}
+
+/* WiFi Configuration Styles */
+.wifi-section {
+    margin: 1.5rem 0;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.section-header h2 {
+    font-size: 1rem;
+    margin: 0;
+}
+
+.btn-small {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.btn-small:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.network-list {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+    .network-list {
+        border-color: #444;
+    }
+}
+
+.network-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+}
+
+@media (prefers-color-scheme: dark) {
+    .network-item {
+        border-bottom-color: #333;
+    }
+}
+
+.network-item:last-child {
+    border-bottom: none;
+}
+
+.network-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+    .network-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+}
+
+.network-item.selected {
+    background: rgba(34, 197, 94, 0.1);
+    border-left: 3px solid #22c55e;
+    padding-left: calc(0.75rem - 3px);
+}
+
+.network-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.network-ssid {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.network-security {
+    font-size: 0.75rem;
+    color: #666;
+}
+
+@media (prefers-color-scheme: dark) {
+    .network-security {
+        color: #999;
+    }
+}
+
+/* Signal strength bars */
+.signal-bars {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 16px;
+    margin-left: 0.5rem;
+}
+
+.signal-bars .bar {
+    width: 4px;
+    background: #ccc;
+    border-radius: 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .signal-bars .bar {
+        background: #555;
+    }
+}
+
+.signal-bars .bar:nth-child(1) { height: 25%; }
+.signal-bars .bar:nth-child(2) { height: 50%; }
+.signal-bars .bar:nth-child(3) { height: 75%; }
+.signal-bars .bar:nth-child(4) { height: 100%; }
+
+.signal-bars .bar.active {
+    background: #22c55e;
+}
+
+/* Password section */
+.password-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #ccc;
+}
+
+@media (prefers-color-scheme: dark) {
+    .password-section {
+        border-top-color: #444;
+    }
+}
+
+.password-section h2 {
+    font-size: 1rem;
+    margin: 0 0 0.75rem 0;
+}
+
+#wifi-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+#password-input {
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+    #password-input {
+        border-color: #555;
+    }
+}
+
+#password-input:focus {
+    outline: none;
+    border-color: #22c55e;
+}
+
+.btn-primary {
+    padding: 0.75rem;
+    font-size: 1rem;
+    background: #22c55e;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-primary:hover {
+    background: #16a34a;
+}
+
+.btn-primary:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+/* Status messages */
+.status-message {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.status-message:empty {
+    display: none;
+}
+
+.status-info {
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+}
+
+.status-success {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+}
+
+.status-error {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+/* Scanning/empty states */
+.scanning-text,
+.no-networks {
+    color: #666;
+    font-size: 0.875rem;
+    text-align: center;
+    padding: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    .scanning-text,
+    .no-networks {
+        color: #999;
+    }
+}

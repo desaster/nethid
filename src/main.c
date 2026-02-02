@@ -36,6 +36,7 @@
 #include "config.h"
 #include "httpd/httpd.h"
 #include "ap_mode.h"
+#include "wifi_scan.h"
 
 #define UART0_TX_PIN 16
 #define UART0_RX_PIN 17
@@ -140,8 +141,19 @@ int main()
             return 1;
         }
 
+        // Initialize WiFi scanning (for network list in config UI)
+        wifi_scan_init();
+
+        // Enable STA mode alongside AP mode for WiFi scanning capability
+        // The cyw43 chip supports concurrent AP+STA operation
+        cyw43_arch_enable_sta_mode();
+
         // Start HTTP server in AP mode
         setup_ap_mode_server();
+
+        // Auto-start a WiFi scan so networks are ready when user loads the page
+        printf("Starting initial WiFi scan\r\n");
+        wifi_scan_start();
 
     } else {
         // Start in STA mode (normal operation)
@@ -172,6 +184,11 @@ int main()
 
         // check BOOTSEL button for AP mode trigger
         bootsel_task();
+
+        // poll WiFi scan completion (AP mode only - scan for available networks)
+        if (in_ap_mode) {
+            wifi_scan_poll();
+        }
 
         // send usb hid report if needed, and stuff
         hid_task();

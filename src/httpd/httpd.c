@@ -19,6 +19,7 @@
 
 #include "board.h"
 #include "ap_mode.h"
+#include "wifi_scan.h"
 
 // Uptime counter (seconds since boot)
 static uint32_t uptime_seconds = 0;
@@ -213,6 +214,122 @@ static int handle_api_config_post_result(struct fs_file *file)
     return 1;
 }
 
+// Helper to map auth_mode to human-readable string
+static const char *auth_mode_to_string(uint8_t auth_mode)
+{
+    // auth_mode values from cyw43_ll.h - check common patterns
+    if (auth_mode == 0) {
+        return "Open";
+    }
+    // WPA2 patterns (0x00400004 truncated or in some form)
+    // The auth_mode in scan results is often just a byte or flags
+    if (auth_mode & 0x04) {
+        return "WPA2";
+    }
+    if (auth_mode & 0x02) {
+        return "WPA";
+    }
+    return "Secured";
+}
+
+// Helper to escape a string for JSON (basic - handles quotes and backslashes)
+static void escape_json_string(const char *src, char *dst, size_t dst_size)
+{
+    size_t j = 0;
+    for (size_t i = 0; src[i] != '\0' && j < dst_size - 1; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= dst_size) break;
+            dst[j++] = '\\';
+        }
+        dst[j++] = c;
+    }
+    dst[j] = '\0';
+}
+
+// Handle GET /api/networks - returns scanned WiFi networks
+static int handle_api_networks(struct fs_file *file)
+{
+    const wifi_scan_state_t *scan = wifi_scan_get_results();
+
+    // Build JSON response
+    char body[400];  // Leave room for headers in 512-byte buffer
+    int pos = 0;
+
+    pos += snprintf(body + pos, sizeof(body) - pos,
+        "{\"scanning\":%s,\"networks\":[",
+        scan->scanning ? "true" : "false");
+
+    for (int i = 0; i < scan->count && pos < (int)sizeof(body) - 80; i++) {
+        if (i > 0) {
+            body[pos++] = ',';
+        }
+
+        // Escape SSID for JSON
+        char escaped_ssid[65];
+        escape_json_string(scan->networks[i].ssid, escaped_ssid, sizeof(escaped_ssid));
+
+        const char *auth_str = auth_mode_to_string(scan->networks[i].auth_mode);
+
+        pos += snprintf(body + pos, sizeof(body) - pos,
+            "{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":\"%s\",\"ch\":%d}",
+            escaped_ssid,
+            scan->networks[i].rssi,
+            auth_str,
+            scan->networks[i].channel);
+    }
+
+    pos += snprintf(body + pos, sizeof(body) - pos, "]}");
+    int body_len = pos;
+
+    int len = snprintf(api_response, sizeof(api_response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "\r\n"
+        "%s",
+        body_len, body);
+
+    memset(file, 0, sizeof(struct fs_file));
+    file->data = api_response;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    return 1;
+}
+
+// Handle POST /api/scan result - returns scan start status
+static bool scan_triggered = false;
+
+static int handle_api_scan_result(struct fs_file *file)
+{
+    char body[64];
+    int body_len;
+
+    if (scan_triggered) {
+        body_len = snprintf(body, sizeof(body), "{\"status\":\"scanning\"}");
+    } else {
+        body_len = snprintf(body, sizeof(body), "{\"status\":\"error\",\"message\":\"scan failed\"}");
+    }
+
+    int len = snprintf(api_response, sizeof(api_response),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "\r\n"
+        "%s",
+        body_len, body);
+
+    memset(file, 0, sizeof(struct fs_file));
+    file->data = api_response;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    return 1;
+}
+
 // Custom file open handler - intercepts API requests
 int fs_open_custom(struct fs_file *file, const char *name)
 {
@@ -239,6 +356,16 @@ int fs_open_custom(struct fs_file *file, const char *name)
     // POST result handler (called after httpd_post_finished returns this URI)
     if (strcmp(name, "/api/config/result") == 0) {
         return handle_api_config_post_result(file);
+    }
+
+    // API endpoint: GET /api/networks - get scanned WiFi networks
+    if (strcmp(name, "/api/networks") == 0) {
+        return handle_api_networks(file);
+    }
+
+    // POST result handler for /api/scan
+    if (strcmp(name, "/api/scan/result") == 0) {
+        return handle_api_scan_result(file);
     }
 
     // Not a custom file, let httpd try the embedded filesystem
@@ -291,9 +418,16 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *http_reque
 
     printf("POST begin: %s (content_len=%d)\r\n", uri, content_len);
 
-    // Only accept POST to /api/config
-    if (strcmp(uri, "/api/config") != 0) {
+    // Accept POST to /api/config or /api/scan
+    if (strcmp(uri, "/api/config") != 0 && strcmp(uri, "/api/scan") != 0) {
         return ERR_VAL;
+    }
+
+    // For /api/scan, we don't need a body - just trigger the scan
+    if (strcmp(uri, "/api/scan") == 0) {
+        strncpy(post_uri, uri, sizeof(post_uri) - 1);
+        post_uri[sizeof(post_uri) - 1] = '\0';
+        return ERR_OK;
     }
 
     // Validate content length
@@ -344,7 +478,14 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_ur
 {
     (void)connection;
 
-    printf("POST finished: body=%s\r\n", post_body);
+    printf("POST finished: uri=%s body=%s\r\n", post_uri, post_body);
+
+    // Handle /api/scan - trigger WiFi scan
+    if (strcmp(post_uri, "/api/scan") == 0) {
+        scan_triggered = (wifi_scan_start() == 0);
+        snprintf(response_uri, response_uri_len, "/api/scan/result");
+        return;
+    }
 
     // Parse JSON body: {"ssid":"...", "password":"..."}
     if (strcmp(post_uri, "/api/config") == 0) {
