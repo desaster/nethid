@@ -1,0 +1,326 @@
+openapi: 3.0.3
+info:
+  title: NetHID API
+  description: HTTP API for controlling the NetHID device
+  version: 1.0.0
+  license:
+    name: MIT
+
+security: []  # No authentication required
+
+servers:
+  - url: http://{host}
+    variables:
+      host:
+        default: nethid.local
+        description: Device hostname or IP address
+
+paths:
+  /api/status:
+    get:
+      summary: Get device status
+      description: Returns device information including hostname, IP, MAC address, uptime, and current mode.
+      responses:
+        '200':
+          description: Device status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hostname:
+                    type: string
+                    example: picow-a1b2c3
+                  mac:
+                    type: string
+                    example: "aa:bb:cc:dd:ee:ff"
+                  ip:
+                    type: string
+                    example: "192.168.1.100"
+                  uptime:
+                    type: integer
+                    description: Seconds since boot
+                    example: 3600
+                  mode:
+                    type: string
+                    enum: [sta, ap]
+                    description: Current WiFi mode (sta = connected to network, ap = access point)
+
+  /api/config:
+    get:
+      summary: Get WiFi configuration
+      description: Returns the currently configured WiFi SSID (password is not returned).
+      responses:
+        '200':
+          description: WiFi configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured:
+                    type: boolean
+                  ssid:
+                    type: string
+                    example: MyNetwork
+    post:
+      summary: Set WiFi configuration
+      description: Store WiFi credentials. Device will reboot to apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ssid, password]
+              properties:
+                ssid:
+                  type: string
+                  maxLength: 32
+                password:
+                  type: string
+                  maxLength: 64
+      responses:
+        '200':
+          description: Configuration saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [saved, error]
+                  rebooting:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/networks:
+    get:
+      summary: Get scanned WiFi networks
+      description: Returns list of WiFi networks found during last scan. Only available in AP mode.
+      responses:
+        '200':
+          description: Network list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanning:
+                    type: boolean
+                    description: True if scan is in progress
+                  networks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ssid:
+                          type: string
+                        rssi:
+                          type: integer
+                          description: Signal strength in dBm
+                        auth:
+                          type: string
+                          enum: [Open, WPA, WPA2, Secured]
+                        ch:
+                          type: integer
+                          description: WiFi channel
+
+  /api/scan:
+    post:
+      summary: Trigger WiFi scan
+      description: Start scanning for WiFi networks. Only available in AP mode.
+      responses:
+        '200':
+          description: Scan started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [scanning, error]
+                  message:
+                    type: string
+
+  /api/reboot:
+    get:
+      summary: Reboot device
+      description: Reboots the device. It will reconnect to the configured WiFi network.
+      responses:
+        '200':
+          description: Reboot initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: rebooting
+
+  /api/reboot-ap:
+    get:
+      summary: Reboot into AP mode
+      description: Reboots the device into access point mode for WiFi configuration.
+      responses:
+        '200':
+          description: Reboot initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: rebooting to AP mode
+
+  /api/hid/key:
+    post:
+      summary: Send key event
+      description: Press, release, or tap a key by HID code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+                  description: USB HID keycode
+                  example: 4
+                action:
+                  type: string
+                  enum: [press, release, tap]
+                  default: tap
+                  description: Key action (tap = press + release)
+      responses:
+        '200':
+          description: Key event sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HidResult'
+
+  /api/hid/mouse/move:
+    post:
+      summary: Move mouse
+      description: Move the mouse cursor by relative delta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dx:
+                  type: integer
+                  minimum: -127
+                  maximum: 127
+                  default: 0
+                  description: Horizontal movement
+                dy:
+                  type: integer
+                  minimum: -127
+                  maximum: 127
+                  default: 0
+                  description: Vertical movement
+      responses:
+        '200':
+          description: Mouse moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HidResult'
+
+  /api/hid/mouse/button:
+    post:
+      summary: Mouse button event
+      description: Press, release, or click a mouse button.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [button]
+              properties:
+                button:
+                  type: integer
+                  minimum: 1
+                  maximum: 31
+                  description: "Button bitmask: 1=left, 2=right, 4=middle, 8=back, 16=forward"
+                  example: 1
+                action:
+                  type: string
+                  enum: [press, release, click]
+                  default: click
+                  description: Button action (click = press + release)
+      responses:
+        '200':
+          description: Button event sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HidResult'
+
+  /api/hid/mouse/scroll:
+    post:
+      summary: Mouse scroll
+      description: Scroll the mouse wheel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                x:
+                  type: integer
+                  minimum: -127
+                  maximum: 127
+                  default: 0
+                  description: Horizontal scroll
+                y:
+                  type: integer
+                  minimum: -127
+                  maximum: 127
+                  default: 0
+                  description: Vertical scroll (positive = up)
+      responses:
+        '200':
+          description: Scroll sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HidResult'
+
+  /api/hid/release:
+    post:
+      summary: Release all keys and buttons
+      description: Releases all currently held keys and mouse buttons. Useful for recovery.
+      responses:
+        '200':
+          description: All released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HidResult'
+
+components:
+  schemas:
+    HidResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+          description: Error message if success is false

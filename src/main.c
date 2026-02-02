@@ -35,6 +35,7 @@
 #include "usb.h"
 #include "config.h"
 #include "httpd/httpd.h"
+#include "websocket/websocket.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
 
@@ -327,6 +328,9 @@ int setup_server()
     // Start HTTP server
     nethid_httpd_init();
 
+    // Start WebSocket server for HID control
+    websocket_init();
+
     cyw43_arch_lwip_end();
 
     return 0;
@@ -339,7 +343,7 @@ int setup_ap_mode_server()
     printf("AP mode server starting\n");
     printf("IP address: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_list)));
 
-    // Start HTTP server (no UDP listener in AP mode)
+    // Start HTTP server only (no UDP or WebSocket in AP mode - it's for config only)
     nethid_httpd_init();
 
     cyw43_arch_lwip_end();

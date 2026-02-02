@@ -26,6 +26,7 @@ add_executable(${TARGET}
     src/usb.c
     src/usb_descriptors.c
     src/httpd/httpd.c
+    src/websocket/websocket.c
     src/ap_mode.c
     src/dhcpserver.c
     src/wifi_scan.c

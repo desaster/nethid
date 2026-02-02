@@ -7,6 +7,8 @@ export default tseslint.config(
     {
         rules: {
             indent: ["error", 4],
+            "array-element-newline": "off",
+            "object-property-newline": "off",
         },
     },
     {

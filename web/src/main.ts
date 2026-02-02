@@ -1,4 +1,21 @@
 import "./style.css";
+import { HIDClient, InputCapture, TouchTrackpad, getKeyDisplayName, isTouchDevice } from "./hid";
+import type { ConnectionState } from "./hid";
+import { KeyboardManager } from "./keyboard";
+import { getDesktopLayouts, MOBILE_LAYOUTS, type LayoutPreset } from "./keyboard-layouts";
+
+// Layout preset storage
+const LAYOUT_PRESET_KEY = 'nethid-layout-preset';
+
+function getLayoutPreset(): LayoutPreset {
+    const stored = localStorage.getItem(LAYOUT_PRESET_KEY);
+    if (stored === 'ansi' || stored === 'iso') return stored;
+    return 'ansi';  // default
+}
+
+function setLayoutPreset(preset: LayoutPreset): void {
+    localStorage.setItem(LAYOUT_PRESET_KEY, preset);
+}
 
 interface DeviceStatus {
     hostname: string;
@@ -7,6 +24,12 @@ interface DeviceStatus {
     uptime: number;
     mode: "sta" | "ap";
 }
+
+// HID client instance (shared)
+let hidClient: HIDClient | null = null;
+let inputCapture: InputCapture | null = null;
+let touchTrackpad: TouchTrackpad | null = null;
+let keyboardManager: KeyboardManager | null = null;
 
 interface WifiNetwork {
     ssid: string;
@@ -121,8 +144,201 @@ function renderStatusPage(status: DeviceStatus): void {
                 <tr><th>Mode</th><td>Station</td></tr>
                 <tr><th>Uptime</th><td>${formatUptime(status.uptime)}</td></tr>
             </table>
+            <button id="control-btn" class="btn-primary" style="margin-top: 1.5rem; width: 100%;">
+                Open Remote Control
+            </button>
         </div>
     `;
+
+    document.getElementById("control-btn")?.addEventListener("click", () => {
+        renderControlPage();
+    });
+}
+
+function renderControlPage(): void {
+    const app = document.querySelector<HTMLDivElement>("#app")!;
+    const isTouch = isTouchDevice();
+
+    app.innerHTML = `
+        <div class="control-page">
+            <div class="control-header">
+                <button id="back-btn" class="btn-small">Back</button>
+                <span id="connection-status" class="connection-status">Disconnected</span>
+                <button id="fullscreen-btn" class="btn-small">Fullscreen</button>
+            </div>
+            <div id="capture-zone" class="capture-zone ${isTouch ? 'touch-mode' : ''}">
+                <div class="capture-content">
+                    <div class="capture-prompt" id="capture-prompt">
+                        ${isTouch ? 'Touch trackpad ready' : 'Click to capture keyboard & mouse'}
+                    </div>
+                    <div class="keys-display" id="keys-display"></div>
+                </div>
+            </div>
+            <div id="keyboard-section" class="keyboard-section"></div>
+            <div class="control-footer">
+                ${isTouch ? `
+                    <div class="touch-hints">
+                        <span>Drag: move</span>
+                        <span>Tap: click</span>
+                        <span>2-finger tap: right-click</span>
+                    </div>
+                ` : `
+                    <div class="modifiers-display" id="modifiers-display"></div>
+                    <div class="control-hint">Press Escape to release</div>
+                `}
+            </div>
+        </div>
+    `;
+
+    // Setup back button
+    document.getElementById("back-btn")?.addEventListener("click", () => {
+        cleanupControl();
+        init();
+    });
+
+    // Setup fullscreen button
+    document.getElementById("fullscreen-btn")?.addEventListener("click", toggleFullscreen);
+
+    // Setup HID client
+    setupHIDControl(isTouch);
+}
+
+function toggleFullscreen(): void {
+    if (document.fullscreenElement) {
+        document.exitFullscreen();
+    } else {
+        document.documentElement.requestFullscreen();
+    }
+}
+
+function setupHIDControl(isTouch: boolean): void {
+    const statusEl = document.getElementById("connection-status")!;
+    const promptEl = document.getElementById("capture-prompt")!;
+    const zoneEl = document.getElementById("capture-zone")!;
+    const keysEl = document.getElementById("keys-display")!;
+    const modsEl = document.getElementById("modifiers-display");
+
+    // Create HID client
+    hidClient = new HIDClient({
+        onStateChange: (state: ConnectionState) => {
+            statusEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+            statusEl.className = `connection-status connection-${state}`;
+
+            // Update prompt for touch mode
+            if (isTouch && state === 'connected') {
+                promptEl.textContent = 'Touch trackpad ready';
+            }
+        },
+        onError: (error: string) => {
+            console.error("HID error:", error);
+        }
+    });
+
+    if (isTouch) {
+        // Touch mode: use TouchTrackpad
+        touchTrackpad = new TouchTrackpad(zoneEl, hidClient);
+        zoneEl.classList.add("touch-active");
+    } else {
+        // Desktop mode: use InputCapture with pointer lock
+        inputCapture = new InputCapture(zoneEl, hidClient, {
+            onCaptureChange: (captured: boolean) => {
+                zoneEl.classList.toggle("captured", captured);
+                promptEl.textContent = captured
+                    ? "Captured"
+                    : "Click to capture keyboard & mouse";
+            },
+            onKeysChange: (keys: Set<string>, modifiers: Set<string>) => {
+                // Update keys display
+                keysEl.innerHTML = Array.from(keys)
+                    .map(k => `<span class="key-badge">${escapeHtml(getKeyDisplayName(k))}</span>`)
+                    .join("");
+
+                // Update modifiers display
+                if (modsEl) {
+                    const modNames = ['Ctrl', 'Shift', 'Alt', 'Meta'];
+                    const activeModNames: string[] = [];
+                    for (const mod of modifiers) {
+                        if (mod.startsWith('Control')) activeModNames.push('Ctrl');
+                        else if (mod.startsWith('Shift')) activeModNames.push('Shift');
+                        else if (mod.startsWith('Alt')) activeModNames.push('Alt');
+                        else if (mod.startsWith('Meta')) activeModNames.push('Meta');
+                    }
+                    modsEl.innerHTML = modNames
+                        .map(m => `<span class="mod-badge ${activeModNames.includes(m) ? 'active' : ''}">${m}</span>`)
+                        .join("");
+                }
+            }
+        });
+
+        // Initialize modifiers display
+        if (modsEl) {
+            modsEl.innerHTML = ['Ctrl', 'Shift', 'Alt', 'Meta']
+                .map(m => `<span class="mod-badge">${m}</span>`)
+                .join("");
+        }
+    }
+
+    // Setup virtual keyboard
+    const keyboardSection = document.getElementById("keyboard-section")!;
+    const currentPreset = getLayoutPreset();
+    const layouts = isTouch ? MOBILE_LAYOUTS : getDesktopLayouts(currentPreset);
+
+    keyboardManager = new KeyboardManager({
+        container: keyboardSection,
+        client: hidClient,
+        layouts,
+        unitSize: isTouch ? 36 : 48,
+        gap: isTouch ? 3 : 4,
+        isTouch,
+    });
+
+    // Add preset selector to tabs row (desktop only)
+    if (!isTouch) {
+        const tabsEl = keyboardSection.querySelector('.km-tabs');
+        if (tabsEl) {
+            const select = document.createElement('select');
+            select.className = 'layout-select';
+            select.innerHTML = `
+                <option value="ansi">ANSI (US)</option>
+                <option value="iso">ISO (UK)</option>
+            `;
+            select.value = currentPreset;
+            select.addEventListener('change', () => {
+                const newPreset = select.value as LayoutPreset;
+                setLayoutPreset(newPreset);
+                // Recreate keyboard with new layout
+                keyboardManager?.destroy();
+                keyboardManager = new KeyboardManager({
+                    container: keyboardSection,
+                    client: hidClient!,
+                    layouts: getDesktopLayouts(newPreset),
+                    unitSize: 48,
+                    gap: 4,
+                    isTouch: false,
+                });
+                // Re-add selector to new tabs
+                const newTabsEl = keyboardSection.querySelector('.km-tabs');
+                if (newTabsEl && !newTabsEl.contains(select)) {
+                    newTabsEl.appendChild(select);
+                }
+            });
+            tabsEl.appendChild(select);
+        }
+    }
+
+    // Connect
+    hidClient.connect();
+}
+
+function cleanupControl(): void {
+    keyboardManager?.destroy();
+    keyboardManager = null;
+    inputCapture?.destroy();
+    inputCapture = null;
+    touchTrackpad?.destroy();
+    touchTrackpad = null;
+    hidClient?.disconnect();
+    hidClient = null;
 }
 
 function renderWifiConfigPage(status: DeviceStatus, networks: NetworksResponse | null): void {
