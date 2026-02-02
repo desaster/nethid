@@ -18,6 +18,7 @@
 #include "hardware/watchdog.h"
 
 #include "board.h"
+#include "settings.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
 #include "usb.h"
@@ -191,7 +192,7 @@ static int handle_api_reboot_ap_result(struct fs_file *file)
 {
     char body[] = "{\"status\":\"rebooting to AP mode\"}";
     api_json_response(file, body, strlen(body));
-    ap_mode_set_force_flag();
+    settings_set_force_ap();
     watchdog_enable(100, false);
     return 1;
 }

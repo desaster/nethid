@@ -36,6 +36,7 @@
 #include "config.h"
 #include "httpd/httpd.h"
 #include "websocket/websocket.h"
+#include "settings.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
 
@@ -115,9 +116,9 @@ int main()
     // Check if we should start in AP mode
     bool start_ap_mode = false;
 
-    if (ap_mode_check_force_flag()) {
+    if (settings_get_force_ap()) {
         printf("Force AP flag detected, clearing and starting AP mode\r\n");
-        ap_mode_clear_force_flag();
+        settings_clear_force_ap();
         start_ap_mode = true;
     }
 
