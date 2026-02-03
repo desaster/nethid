@@ -22,6 +22,7 @@
 #include "ap_mode.h"
 #include "wifi_scan.h"
 #include "usb.h"
+#include "websocket/websocket.h"
 #include "cjson/cJSON.h"
 
 //--------------------------------------------------------------------+
@@ -172,6 +173,9 @@ static int handle_api_status(struct fs_file *file)
     cJSON_AddNumberToObject(json, "uptime", uptime_seconds);
     cJSON_AddStringToObject(json, "mode", in_ap_mode ? "ap" : "sta");
     cJSON_AddStringToObject(json, "version", NETHID_VERSION);
+    cJSON_AddBoolToObject(json, "usb_mounted", usb_mounted);
+    cJSON_AddBoolToObject(json, "usb_suspended", usb_suspended);
+    cJSON_AddBoolToObject(json, "websocket_connected", websocket_client_connected());
 
     api_cjson_response(file, json);
     return 1;

@@ -341,6 +341,18 @@ button:hover {
     color: var(--accent);
 }
 
+.connection-displaced {
+    color: var(--error);
+}
+
+.connection-usb-suspended {
+    color: var(--warning);
+}
+
+.connection-usb-disconnected {
+    color: var(--warning);
+}
+
 .capture-zone {
     flex: 1;
     display: flex;

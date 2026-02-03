@@ -46,16 +46,23 @@ const CMD_MOUSE_BUTTON = 0x03;
 const CMD_SCROLL = 0x04;
 const CMD_CONSUMER = 0x06;
 const CMD_RELEASE_ALL = 0x0F;
+const CMD_STATUS = 0x10;  // Server -> Client: USB status
 
 // Mouse button bits
 const BTN_LEFT = 0x01;
 const BTN_RIGHT = 0x02;
 const BTN_MIDDLE = 0x04;
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'displaced';
+
+export interface USBStatus {
+    mounted: boolean;
+    suspended: boolean;
+}
 
 export interface HIDClientCallbacks {
     onStateChange?: (state: ConnectionState) => void;
+    onUSBStatusChange?: (status: USBStatus) => void;
     onError?: (error: string) => void;
 }
 
@@ -103,6 +110,7 @@ export function isModifierKey(code: string): boolean {
 export class HIDClient {
     private ws: WebSocket | null = null;
     private state: ConnectionState = 'disconnected';
+    private usbStatus: USBStatus = { mounted: false, suspended: false };
     private callbacks: HIDClientCallbacks;
     private reconnectTimer: number | null = null;
     private reconnectDelay = 1000;
@@ -110,6 +118,10 @@ export class HIDClient {
 
     constructor(callbacks: HIDClientCallbacks = {}) {
         this.callbacks = callbacks;
+    }
+
+    getUSBStatus(): USBStatus {
+        return { ...this.usbStatus };
     }
 
     connect(): void {
@@ -130,16 +142,41 @@ export class HIDClient {
             this.reconnectDelay = 1000;
         };
 
-        this.ws.onclose = () => {
-            this.setState('disconnected');
-            if (!this.intentionalDisconnect) {
-                this.scheduleReconnect();
+        this.ws.onclose = (event) => {
+            // Close code 4001 = session taken over by another client
+            if (event.code === 4001) {
+                this.setState('displaced');
+                // Don't auto-reconnect when displaced to avoid reconnect loops
+            } else {
+                this.setState('disconnected');
+                if (!this.intentionalDisconnect) {
+                    this.scheduleReconnect();
+                }
             }
         };
 
         this.ws.onerror = () => {
             this.callbacks.onError?.('WebSocket error');
         };
+
+        this.ws.onmessage = (event) => {
+            this.handleMessage(event.data);
+        };
+    }
+
+    private handleMessage(data: ArrayBuffer): void {
+        const bytes = new Uint8Array(data);
+        if (bytes.length < 2) return;
+
+        const cmd = bytes[0];
+        if (cmd === CMD_STATUS) {
+            const flags = bytes[1];
+            this.usbStatus = {
+                mounted: (flags & 0x01) !== 0,
+                suspended: (flags & 0x02) !== 0,
+            };
+            this.callbacks.onUSBStatusChange?.(this.usbStatus);
+        }
     }
 
     disconnect(): void {

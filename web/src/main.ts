@@ -1,6 +1,6 @@
 import "./style.css";
 import { HIDClient, InputCapture, TouchTrackpad, getKeyDisplayName, isTouchDevice } from "./hid";
-import type { ConnectionState } from "./hid";
+import type { ConnectionState, USBStatus } from "./hid";
 import { KeyboardManager } from "./keyboard";
 import { getDesktopLayouts, MOBILE_LAYOUTS, type LayoutPreset } from "./keyboard-layouts";
 
@@ -303,16 +303,52 @@ function setupHIDControl(isTouch: boolean): void {
     const keysEl = document.getElementById("keys-display")!;
     const modsEl = document.getElementById("modifiers-display");
 
+    // Track current states for combined status display
+    let currentConnState: ConnectionState = 'disconnected';
+    let currentUSBStatus: USBStatus = { mounted: false, suspended: false };
+
+    // Update status display based on connection and USB state
+    function updateStatusDisplay(): void {
+        let text: string;
+        let cssClass: string;
+
+        if (currentConnState === 'connected') {
+            if (currentUSBStatus.suspended) {
+                text = 'Connected (Host Sleeping)';
+                cssClass = 'connection-usb-suspended';
+            } else if (!currentUSBStatus.mounted) {
+                text = 'Connected (USB Disconnected)';
+                cssClass = 'connection-usb-disconnected';
+            } else {
+                text = 'Connected';
+                cssClass = 'connection-connected';
+            }
+        } else if (currentConnState === 'displaced') {
+            text = 'Disconnected (Another Session)';
+            cssClass = 'connection-displaced';
+        } else {
+            text = currentConnState.charAt(0).toUpperCase() + currentConnState.slice(1);
+            cssClass = `connection-${currentConnState}`;
+        }
+
+        statusEl.textContent = text;
+        statusEl.className = `connection-status ${cssClass}`;
+
+        // Update prompt for touch mode
+        if (isTouch && currentConnState === 'connected') {
+            promptEl.textContent = 'Touch trackpad ready';
+        }
+    }
+
     // Create HID client
     hidClient = new HIDClient({
         onStateChange: (state: ConnectionState) => {
-            statusEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
-            statusEl.className = `connection-status connection-${state}`;
-
-            // Update prompt for touch mode
-            if (isTouch && state === 'connected') {
-                promptEl.textContent = 'Touch trackpad ready';
-            }
+            currentConnState = state;
+            updateStatusDisplay();
+        },
+        onUSBStatusChange: (status: USBStatus) => {
+            currentUSBStatus = status;
+            updateStatusDisplay();
         },
         onError: (error: string) => {
             console.error("HID error:", error);

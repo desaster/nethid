@@ -24,4 +24,8 @@ bool websocket_client_connected(void);
 // Release all HID keys/buttons (called on disconnect)
 void websocket_release_all(void);
 
+// Send USB status to connected WebSocket client
+// Call when USB state changes (mount/unmount/suspend/resume)
+void websocket_send_status(void);
+
 #endif /* __WEBSOCKET_H */

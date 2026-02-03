@@ -16,6 +16,7 @@
 #include "lwip/pbuf.h"
 
 #include "usb.h"
+#include "board.h"
 
 //--------------------------------------------------------------------+
 // Minimal SHA-1 Implementation (for WebSocket handshake only)
@@ -152,6 +153,7 @@ static void base64_encode(const uint8_t *data, size_t len, char *out)
 #define HID_CMD_SCROLL        0x04
 #define HID_CMD_CONSUMER      0x06
 #define HID_CMD_RELEASE_ALL   0x0F
+#define HID_CMD_STATUS        0x10  // Server -> Client: USB status
 
 // Buffer sizes
 #define HTTP_BUFFER_SIZE 1024
@@ -197,6 +199,7 @@ static bool compute_accept_key(const char *client_key, char *accept_key, size_t 
 static void process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, size_t len);
 static void process_hid_command(const uint8_t *payload, size_t len);
 static void send_close_frame(struct tcp_pcb *pcb);
+static void send_close_frame_with_code(struct tcp_pcb *pcb, uint16_t code, const char *reason);
 static void close_connection(void);
 
 //--------------------------------------------------------------------+
@@ -252,6 +255,34 @@ void websocket_release_all(void)
     move_mouse(0, 0, 0, 0, 0);
 }
 
+void websocket_send_status(void)
+{
+    if (ws_state != WS_STATE_CONNECTED || ws_client_pcb == NULL) {
+        return;
+    }
+
+    // Build status flags
+    uint8_t flags = 0;
+    if (usb_mounted)   flags |= 0x01;  // Bit 0: usb_mounted
+    if (usb_suspended) flags |= 0x02;  // Bit 1: usb_suspended
+
+    // Build WebSocket binary frame
+    // [0x82] = FIN + binary opcode
+    // [0x02] = payload length (2 bytes)
+    // [HID_CMD_STATUS] [flags]
+    uint8_t frame[4] = {
+        0x82,           // FIN + binary opcode
+        0x02,           // Payload length
+        HID_CMD_STATUS, // Command type
+        flags           // Status flags
+    };
+
+    err_t err = tcp_write(ws_client_pcb, frame, sizeof(frame), TCP_WRITE_FLAG_COPY);
+    if (err == ERR_OK) {
+        tcp_output(ws_client_pcb);
+    }
+}
+
 //--------------------------------------------------------------------+
 // TCP Callbacks
 //--------------------------------------------------------------------+
@@ -264,11 +295,24 @@ static err_t ws_accept(void *arg, struct tcp_pcb *newpcb, err_t err)
         return ERR_VAL;
     }
 
-    // Single client only - reject if already connected
+    // Session takeover - if client already connected, disconnect it
     if (ws_client_pcb != NULL) {
-        printf("WebSocket: Rejecting (client already connected)\r\n");
-        tcp_abort(newpcb);
-        return ERR_ABRT;
+        printf("WebSocket: Taking over session (disconnecting previous client)\r\n");
+
+        // Send close frame to old client with code 4001
+        if (ws_state == WS_STATE_CONNECTED) {
+            send_close_frame_with_code(ws_client_pcb, 4001, "Session taken over");
+        }
+
+        // Clean up old client
+        websocket_release_all();
+        tcp_arg(ws_client_pcb, NULL);
+        tcp_recv(ws_client_pcb, NULL);
+        tcp_err(ws_client_pcb, NULL);
+        tcp_sent(ws_client_pcb, NULL);
+        tcp_close(ws_client_pcb);
+        ws_client_pcb = NULL;
+        ws_state = WS_STATE_IDLE;
     }
 
     printf("WebSocket: New connection\r\n");
@@ -325,6 +369,8 @@ static err_t ws_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
             if (process_http_handshake(tpcb)) {
                 ws_state = WS_STATE_CONNECTED;
                 printf("WebSocket: Handshake complete\r\n");
+                // Send initial USB status to client
+                websocket_send_status();
             } else {
                 printf("WebSocket: Handshake failed\r\n");
                 close_connection();
@@ -646,6 +692,31 @@ static void send_close_frame(struct tcp_pcb *pcb)
 {
     uint8_t close_frame[2] = {0x88, 0x00};  // FIN + CLOSE, no payload
     tcp_write(pcb, close_frame, 2, TCP_WRITE_FLAG_COPY);
+    tcp_output(pcb);
+}
+
+static void send_close_frame_with_code(struct tcp_pcb *pcb, uint16_t code, const char *reason)
+{
+    size_t reason_len = reason ? strlen(reason) : 0;
+    size_t payload_len = 2 + reason_len;  // 2 bytes for code + reason string
+
+    if (payload_len > 125) {
+        // Truncate reason if too long
+        reason_len = 123;
+        payload_len = 125;
+    }
+
+    uint8_t frame[2 + 125];  // Max: 2-byte header + 125-byte payload
+    frame[0] = 0x88;  // FIN + CLOSE opcode
+    frame[1] = (uint8_t)payload_len;
+    frame[2] = (code >> 8) & 0xFF;  // Close code high byte (big-endian)
+    frame[3] = code & 0xFF;         // Close code low byte
+
+    if (reason && reason_len > 0) {
+        memcpy(frame + 4, reason, reason_len);
+    }
+
+    tcp_write(pcb, frame, 2 + payload_len, TCP_WRITE_FLAG_COPY);
     tcp_output(pcb);
 }
 
