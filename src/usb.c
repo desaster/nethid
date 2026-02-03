@@ -41,6 +41,9 @@
 queue_t fifo_keyboard;
 queue_t fifo_mouse;
 queue_t fifo_consumer;
+queue_t fifo_system;
+
+static bool remote_wakeup_enabled = false;
 
 uint8_t keycodes[6] = { 0, 0, 0, 0, 0, 0 };
 typedef struct {
@@ -63,8 +66,10 @@ void tud_mount_cb(void)
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
     queue_init(&fifo_mouse, sizeof(mouse_data), 128);
     queue_init(&fifo_consumer, sizeof(uint16_t), 32);
+    queue_init(&fifo_system, sizeof(uint8_t), 32);
     usb_mounted = true;
-    usb_suspended = false;  // Clear suspended flag on mount
+    usb_suspended = false;
+    remote_wakeup_enabled = false;
     update_blink_state();
     websocket_send_status();
 }
@@ -76,7 +81,9 @@ void tud_umount_cb(void)
     queue_free(&fifo_keyboard);
     queue_free(&fifo_mouse);
     queue_free(&fifo_consumer);
+    queue_free(&fifo_system);
     usb_mounted = false;
+    remote_wakeup_enabled = false;
     update_blink_state();
     websocket_send_status();
 }
@@ -86,8 +93,8 @@ void tud_umount_cb(void)
 // Within 7ms, device must draw an average of current less than 2.5 mA from bus
 void tud_suspend_cb(bool remote_wakeup_en)
 {
-    printf("USB: Suspend callback (remote_wakeup_en=%d)\r\n", remote_wakeup_en);
-    (void) remote_wakeup_en;
+    printf("USB: Suspend (remote_wakeup_en=%d)\r\n", remote_wakeup_en);
+    remote_wakeup_enabled = remote_wakeup_en;
     usb_suspended = true;
     update_blink_state();
     websocket_send_status();
@@ -193,6 +200,23 @@ void release_consumer(void)
     }
 }
 
+void press_system(uint16_t code)
+{
+    // Convert HID usage to report value (0x81->1, 0x82->2, 0x83->3)
+    uint8_t report_val = (uint8_t)(code - 0x80);
+    if (!queue_try_add(&fifo_system, &report_val)) {
+        printf("System report queue full!\r\n");
+    }
+}
+
+void release_system(void)
+{
+    uint8_t report_val = 0;
+    if (!queue_try_add(&fifo_system, &report_val)) {
+        printf("System report queue full!\r\n");
+    }
+}
+
 //
 // private function for sending updated usb packet
 //
@@ -239,6 +263,12 @@ static void send_events(int report_id)
             // printf("Sending consumer code: %04x\r\n", code);
             tud_hid_report(REPORT_ID_CONSUMER_CONTROL, &code, sizeof(code));
         }
+    } else if (report_id == REPORT_ID_SYSTEM_CONTROL && !queue_is_empty(&fifo_system)) {
+        uint8_t report_val;
+        if (queue_try_remove(&fifo_system, &report_val)) {
+            // printf("Sending system code: %02x\r\n", report_val);
+            tud_hid_report(REPORT_ID_SYSTEM_CONTROL, &report_val, sizeof(report_val));
+        }
     } else {
         // printf("Nothing more to send for id %d\r\n", report_id);
     }
@@ -258,19 +288,26 @@ void hid_task(void)
 
     start_ms += interval_ms;
 
-    // skip if hid is not ready yet
-    if (!tud_hid_ready()) {
-        return;
-    }
-
+    // Check for remote wakeup BEFORE checking tud_hid_ready()
+    // (tud_hid_ready() returns false when suspended, so we'd never reach wakeup logic)
     if (tud_suspended() &&
             (!queue_is_empty(&fifo_keyboard) ||
              !queue_is_empty(&fifo_mouse) ||
-             !queue_is_empty(&fifo_consumer))) {
+             !queue_is_empty(&fifo_consumer) ||
+             !queue_is_empty(&fifo_system))) {
         // Wake up host if we are in suspend mode
         // and REMOTE_WAKEUP feature is enabled by host
-        tud_remote_wakeup();
+        if (remote_wakeup_enabled) {
+            printf("USB: Triggering remote wakeup\r\n");
+            tud_remote_wakeup();
+        } else {
+            printf("USB: Remote wakeup not enabled by host\r\n");
+        }
+        return;
+    }
 
+    // skip if hid is not ready yet
+    if (!tud_hid_ready()) {
         return;
     }
 
@@ -279,6 +316,8 @@ void hid_task(void)
         send_events(REPORT_ID_KEYBOARD);
     } else if (!queue_is_empty(&fifo_consumer)) {
         send_events(REPORT_ID_CONSUMER_CONTROL);
+    } else if (!queue_is_empty(&fifo_system)) {
+        send_events(REPORT_ID_SYSTEM_CONTROL);
     } else if (!queue_is_empty(&fifo_mouse)) {
         send_events(REPORT_ID_MOUSE);
     }

@@ -320,8 +320,13 @@ bool hid_execute_key(const hid_key_info_t *key_info, hid_action_t action)
     }
 
     if (key_info->type == HID_KEY_TYPE_SYSTEM) {
-        // TODO: Implement system key support
-        return false;
+        if (action == HID_ACTION_TAP || action == HID_ACTION_PRESS) {
+            press_system(key_info->code);
+        }
+        if (action == HID_ACTION_TAP || action == HID_ACTION_RELEASE) {
+            release_system();
+        }
+        return true;
     }
 
     // Keyboard

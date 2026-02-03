@@ -45,6 +45,7 @@ const CMD_MOUSE_MOVE = 0x02;
 const CMD_MOUSE_BUTTON = 0x03;
 const CMD_SCROLL = 0x04;
 const CMD_CONSUMER = 0x06;
+const CMD_SYSTEM = 0x07;
 const CMD_RELEASE_ALL = 0x0F;
 const CMD_STATUS = 0x10;  // Server -> Client: USB status
 
@@ -270,6 +271,16 @@ export class HIDClient {
     sendConsumerKey(code: number, down: boolean): void {
         const buf = new Uint8Array(4);
         buf[0] = CMD_CONSUMER;
+        buf[1] = code & 0xFF;
+        buf[2] = (code >> 8) & 0xFF;
+        buf[3] = down ? 1 : 0;
+        this.send(buf);
+    }
+
+    // System key (power, sleep, wake)
+    sendSystemKey(code: number, down: boolean): void {
+        const buf = new Uint8Array(4);
+        buf[0] = CMD_SYSTEM;
         buf[1] = code & 0xFF;
         buf[2] = (code >> 8) & 0xFF;
         buf[3] = down ? 1 : 0;

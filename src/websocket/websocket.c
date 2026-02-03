@@ -152,6 +152,7 @@ static void base64_encode(const uint8_t *data, size_t len, char *out)
 #define HID_CMD_MOUSE_BUTTON  0x03
 #define HID_CMD_SCROLL        0x04
 #define HID_CMD_CONSUMER      0x06
+#define HID_CMD_SYSTEM        0x07
 #define HID_CMD_RELEASE_ALL   0x0F
 #define HID_CMD_STATUS        0x10  // Server -> Client: USB status
 
@@ -669,6 +670,19 @@ static void process_hid_command(const uint8_t *payload, size_t len)
                     press_consumer(code);
                 } else {
                     release_consumer();
+                }
+            }
+            break;
+
+        case HID_CMD_SYSTEM:
+            // [0x07][code_lo:u8][code_hi:u8][down:u8]
+            if (len >= 4) {
+                uint16_t code = payload[1] | (payload[2] << 8);
+                bool down = payload[3] != 0;
+                if (down) {
+                    press_system(code);
+                } else {
+                    release_system();
                 }
             }
             break;

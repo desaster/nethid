@@ -10,8 +10,8 @@ import type { HIDClient } from './hid';
 
 // Key action types
 export interface KeyAction {
-    type: 'hid' | 'consumer' | 'modifier' | 'layer' | 'noop';
-    code?: number;        // HID scancode or consumer code
+    type: 'hid' | 'consumer' | 'system' | 'modifier' | 'layer' | 'noop';
+    code?: number;        // HID scancode, consumer code, or system code
     layer?: string;       // Target layer ID for layer switch keys
     toggle?: boolean;     // For modifiers: sticky toggle vs momentary
 }
@@ -314,6 +314,11 @@ export class VirtualKeyboard {
                     this.client.sendConsumerKey(action.code, true);
                 }
                 break;
+            case 'system':
+                if (action.code !== undefined) {
+                    this.client.sendSystemKey(action.code, true);
+                }
+                break;
             case 'modifier':
                 if (action.code !== undefined) {
                     this.client.sendKeyDownByCode(action.code);
@@ -340,6 +345,11 @@ export class VirtualKeyboard {
             case 'consumer':
                 if (action.code !== undefined) {
                     this.client.sendConsumerKey(action.code, false);
+                }
+                break;
+            case 'system':
+                if (action.code !== undefined) {
+                    this.client.sendSystemKey(action.code, false);
                 }
                 break;
             case 'modifier':

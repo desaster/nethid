@@ -104,9 +104,15 @@ export const CONSUMER = {
     WWW_HOME: 0x0223, WWW_BACK: 0x0224, WWW_FORWARD: 0x0225, WWW_REFRESH: 0x0227,
 };
 
+// System Control Codes (Power, Sleep, Wake)
+export const SYSTEM = {
+    POWER: 0x0081, SLEEP: 0x0082, WAKE: 0x0083,
+};
+
 const hid = (code: number): KeyAction => ({ type: 'hid', code });
 const mod = (code: number): KeyAction => ({ type: 'modifier', code, toggle: true });
 const consumer = (code: number): KeyAction => ({ type: 'consumer', code });
+const system = (code: number): KeyAction => ({ type: 'system', code });
 const noop = (): KeyAction => ({ type: 'noop' });
 
 // TKL (Tenkeyless) Main Layout - 87 keys with shift legends
@@ -190,19 +196,21 @@ export const TKL_ISO: KeyboardLayout = {
     ],
 };
 
-// Media Layout - media controls and browser shortcuts
+// Extra Layout - media controls, browser shortcuts, and system keys
 export const MEDIA_LAYOUT: KeyboardLayout = {
     id: 'media',
-    name: 'Media',
+    name: 'Extra',
     kle: [
         [{ w: 1.5 }, "Prev", { w: 2 }, "Play/Pause", { w: 1.5 }, "Next", { x: 0.5 }, { w: 1.5 }, "Stop"],
         [{ y: 0.25, w: 1.5 }, "Mute", { w: 2 }, "Vol -", { w: 1.5 }, "Vol +"],
         [{ y: 0.5 }, "Back", "Forward", "Refresh", "Home"],
+        [{ y: 0.5 }, "Power", "Sleep", "Wake"],
     ],
     mapping: [
         consumer(CONSUMER.PREV_TRACK), consumer(CONSUMER.PLAY_PAUSE), consumer(CONSUMER.NEXT_TRACK), consumer(CONSUMER.STOP),
         consumer(CONSUMER.MUTE), consumer(CONSUMER.VOLUME_DOWN), consumer(CONSUMER.VOLUME_UP),
         consumer(CONSUMER.WWW_BACK), consumer(CONSUMER.WWW_FORWARD), consumer(CONSUMER.WWW_REFRESH), consumer(CONSUMER.WWW_HOME),
+        system(SYSTEM.POWER), system(SYSTEM.SLEEP), system(SYSTEM.WAKE),
     ],
 };
 
@@ -267,18 +275,20 @@ export const MOBILE_FN: KeyboardLayout = {
     ],
 };
 
-// Mobile Media Layout - Large media controls
+// Mobile Extra Layout - Large media controls and system keys
 export const MOBILE_MEDIA: KeyboardLayout = {
     id: 'mobile-media',
-    name: 'Media',
+    name: 'Extra',
     kle: [
         [{ w: 2, h: 2 }, "Prev", { w: 3, h: 2 }, "Play\nPause", { w: 2, h: 2 }, "Next"],
         [],
         [{ y: 0.25 }, "Mute", { w: 2.5 }, "Vol -", { w: 2.5 }, "Vol +"],
+        [{ y: 0.25 }, "Power", { w: 2.5 }, "Sleep", { w: 2.5 }, "Wake"],
     ],
     mapping: [
         consumer(CONSUMER.PREV_TRACK), consumer(CONSUMER.PLAY_PAUSE), consumer(CONSUMER.NEXT_TRACK),
         consumer(CONSUMER.MUTE), consumer(CONSUMER.VOLUME_DOWN), consumer(CONSUMER.VOLUME_UP),
+        system(SYSTEM.POWER), system(SYSTEM.SLEEP), system(SYSTEM.WAKE),
     ],
 };
 
