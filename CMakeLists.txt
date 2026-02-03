@@ -30,6 +30,7 @@ add_executable(${TARGET}
     src/board.c
     src/usb.c
     src/usb_descriptors.c
+    src/hid_keys.c
     src/httpd/httpd.c
     src/websocket/websocket.c
     src/mqtt/mqtt.c

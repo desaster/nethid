@@ -181,21 +181,31 @@ paths:
   /api/hid/key:
     post:
       summary: Send key event
-      description: Press, release, or tap a key by HID code.
+      description: Press, release, or tap a key by name.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code]
+              required: [key]
               properties:
-                code:
-                  type: integer
-                  minimum: 0
-                  maximum: 255
-                  description: USB HID keycode
-                  example: 4
+                key:
+                  type: string
+                  description: |
+                    Key name, single character, or hex code. Examples:
+                    - Letters: "A", "B", "a", "b"
+                    - Numbers: "1", "2"
+                    - Special: "ENTER", "ESCAPE", "TAB", "SPACE", "BACKSPACE"
+                    - Modifiers: "CTRL", "SHIFT", "ALT", "GUI"
+                    - Function: "F1" through "F12"
+                    - Media: "VOLUME_UP", "VOLUME_DOWN", "MUTE", "PLAY_PAUSE"
+                    - Hex codes: "0x04" (A key)
+                  example: "A"
+                type:
+                  type: string
+                  enum: [keyboard, consumer, system]
+                  description: Key type (only needed for raw hex codes)
                 action:
                   type: string
                   enum: [press, release, tap]

@@ -54,7 +54,7 @@ For programmatic control, see the [API specification](openapi.yaml).
 Configure via Settings in the web UI. The device subscribes to `{topic}/#`.
 
 **Topics:**
-- `{topic}/key` - Keyboard: `{"key": "a"}` or `{"key": "ENTER", "down": true}`
+- `{topic}/key` - Keyboard: `{"key": "a"}` or `{"key": "ENTER", "action": "press"}`
 - `{topic}/mouse/move` - Move: `{"x": 10, "y": -5}`
 - `{topic}/mouse/button` - Click: `{"button": "left", "down": true}`
 - `{topic}/scroll` - Scroll: `{"x": 0, "y": -3}`
@@ -62,7 +62,7 @@ Configure via Settings in the web UI. The device subscribes to `{topic}/#`.
 
 Key names: `a`-`z`, `0`-`9`, `ENTER`, `ESCAPE`, `TAB`, `SPACE`, `BACKSPACE`, `DELETE`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `F1`-`F12`, `CTRL`, `SHIFT`, `ALT`, `GUI`, `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`, `PLAY_PAUSE`, etc.
 
-Omit `down` field for tap (press + release). Use `down: true` for press, `down: false` for release.
+Omit `action` field for tap (press + release). Use `"action": "press"` for press, `"action": "release"` for release.
 
 ![Home Assistant example](pics/nethid_ha_example.png)
 

@@ -21,6 +21,7 @@
 #include "settings.h"
 #include "board.h"
 #include "usb.h"
+#include "hid_keys.h"
 #include "cjson/cJSON.h"
 
 // Get milliseconds since boot (similar to millis() from TinyUSB)
@@ -77,219 +78,6 @@ extern uint8_t keycodes[6];
 // Mouse button state for MQTT
 static uint8_t mqtt_mouse_buttons = 0;
 
-//--------------------------------------------------------------------+
-// HID Key Lookup Tables
-//--------------------------------------------------------------------+
-
-typedef enum {
-    KEY_TYPE_KEYBOARD,
-    KEY_TYPE_CONSUMER
-} key_type_t;
-
-typedef struct {
-    const char *name;
-    uint16_t code;
-    key_type_t type;
-} key_entry_t;
-
-// Keyboard HID codes (most common keys)
-static const key_entry_t key_table[] = {
-    // Letters
-    {"HID_KEY_A", 0x04, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_B", 0x05, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_C", 0x06, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_D", 0x07, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_E", 0x08, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F", 0x09, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_G", 0x0A, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_H", 0x0B, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_I", 0x0C, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_J", 0x0D, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_K", 0x0E, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_L", 0x0F, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_M", 0x10, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_N", 0x11, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_O", 0x12, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_P", 0x13, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_Q", 0x14, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_R", 0x15, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_S", 0x16, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_T", 0x17, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_U", 0x18, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_V", 0x19, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_W", 0x1A, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_X", 0x1B, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_Y", 0x1C, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_Z", 0x1D, KEY_TYPE_KEYBOARD},
-    // Numbers
-    {"HID_KEY_1", 0x1E, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_2", 0x1F, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_3", 0x20, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_4", 0x21, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_5", 0x22, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_6", 0x23, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_7", 0x24, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_8", 0x25, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_9", 0x26, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_0", 0x27, KEY_TYPE_KEYBOARD},
-    // Special keys
-    {"HID_KEY_ENTER", 0x28, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ESCAPE", 0x29, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_BACKSPACE", 0x2A, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_TAB", 0x2B, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SPACE", 0x2C, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_MINUS", 0x2D, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_EQUAL", 0x2E, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_BRACKET_LEFT", 0x2F, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_BRACKET_RIGHT", 0x30, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_BACKSLASH", 0x31, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SEMICOLON", 0x33, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_APOSTROPHE", 0x34, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_GRAVE", 0x35, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_COMMA", 0x36, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_PERIOD", 0x37, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SLASH", 0x38, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_CAPS_LOCK", 0x39, KEY_TYPE_KEYBOARD},
-    // Function keys
-    {"HID_KEY_F1", 0x3A, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F2", 0x3B, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F3", 0x3C, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F4", 0x3D, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F5", 0x3E, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F6", 0x3F, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F7", 0x40, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F8", 0x41, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F9", 0x42, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F10", 0x43, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F11", 0x44, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_F12", 0x45, KEY_TYPE_KEYBOARD},
-    // Navigation
-    {"HID_KEY_PRINT_SCREEN", 0x46, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SCROLL_LOCK", 0x47, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_PAUSE", 0x48, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_INSERT", 0x49, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_HOME", 0x4A, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_PAGE_UP", 0x4B, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_DELETE", 0x4C, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_END", 0x4D, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_PAGE_DOWN", 0x4E, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ARROW_RIGHT", 0x4F, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ARROW_LEFT", 0x50, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ARROW_DOWN", 0x51, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ARROW_UP", 0x52, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_NUM_LOCK", 0x53, KEY_TYPE_KEYBOARD},
-    // Modifiers
-    {"HID_KEY_CONTROL_LEFT", 0xE0, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SHIFT_LEFT", 0xE1, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ALT_LEFT", 0xE2, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_GUI_LEFT", 0xE3, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_CONTROL_RIGHT", 0xE4, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_SHIFT_RIGHT", 0xE5, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_ALT_RIGHT", 0xE6, KEY_TYPE_KEYBOARD},
-    {"HID_KEY_GUI_RIGHT", 0xE7, KEY_TYPE_KEYBOARD},
-    // Short aliases
-    {"ENTER", 0x28, KEY_TYPE_KEYBOARD},
-    {"RETURN", 0x28, KEY_TYPE_KEYBOARD},
-    {"ESC", 0x29, KEY_TYPE_KEYBOARD},
-    {"ESCAPE", 0x29, KEY_TYPE_KEYBOARD},
-    {"BACKSPACE", 0x2A, KEY_TYPE_KEYBOARD},
-    {"TAB", 0x2B, KEY_TYPE_KEYBOARD},
-    {"SPACE", 0x2C, KEY_TYPE_KEYBOARD},
-    {"CAPSLOCK", 0x39, KEY_TYPE_KEYBOARD},
-    {"INSERT", 0x49, KEY_TYPE_KEYBOARD},
-    {"HOME", 0x4A, KEY_TYPE_KEYBOARD},
-    {"PAGEUP", 0x4B, KEY_TYPE_KEYBOARD},
-    {"DELETE", 0x4C, KEY_TYPE_KEYBOARD},
-    {"END", 0x4D, KEY_TYPE_KEYBOARD},
-    {"PAGEDOWN", 0x4E, KEY_TYPE_KEYBOARD},
-    {"RIGHT", 0x4F, KEY_TYPE_KEYBOARD},
-    {"LEFT", 0x50, KEY_TYPE_KEYBOARD},
-    {"DOWN", 0x51, KEY_TYPE_KEYBOARD},
-    {"UP", 0x52, KEY_TYPE_KEYBOARD},
-    {"CTRL", 0xE0, KEY_TYPE_KEYBOARD},
-    {"SHIFT", 0xE1, KEY_TYPE_KEYBOARD},
-    {"ALT", 0xE2, KEY_TYPE_KEYBOARD},
-    {"GUI", 0xE3, KEY_TYPE_KEYBOARD},
-    {"WIN", 0xE3, KEY_TYPE_KEYBOARD},
-    {"SUPER", 0xE3, KEY_TYPE_KEYBOARD},
-    {"META", 0xE3, KEY_TYPE_KEYBOARD},
-    // Consumer control codes
-    {"PLAY_PAUSE", 0x00CD, KEY_TYPE_CONSUMER},
-    {"NEXT_TRACK", 0x00B5, KEY_TYPE_CONSUMER},
-    {"PREV_TRACK", 0x00B6, KEY_TYPE_CONSUMER},
-    {"STOP", 0x00B7, KEY_TYPE_CONSUMER},
-    {"MUTE", 0x00E2, KEY_TYPE_CONSUMER},
-    {"VOLUME_UP", 0x00E9, KEY_TYPE_CONSUMER},
-    {"VOLUME_DOWN", 0x00EA, KEY_TYPE_CONSUMER},
-    {"VOL_UP", 0x00E9, KEY_TYPE_CONSUMER},
-    {"VOL_DOWN", 0x00EA, KEY_TYPE_CONSUMER},
-    {"MEDIA_SELECT", 0x0183, KEY_TYPE_CONSUMER},
-    {"MAIL", 0x018A, KEY_TYPE_CONSUMER},
-    {"CALCULATOR", 0x0192, KEY_TYPE_CONSUMER},
-    {"MY_COMPUTER", 0x0194, KEY_TYPE_CONSUMER},
-    {"WWW_SEARCH", 0x0221, KEY_TYPE_CONSUMER},
-    {"WWW_HOME", 0x0223, KEY_TYPE_CONSUMER},
-    {"WWW_BACK", 0x0224, KEY_TYPE_CONSUMER},
-    {"WWW_FORWARD", 0x0225, KEY_TYPE_CONSUMER},
-    {"WWW_STOP", 0x0226, KEY_TYPE_CONSUMER},
-    {"WWW_REFRESH", 0x0227, KEY_TYPE_CONSUMER},
-    {"WWW_FAVORITES", 0x022A, KEY_TYPE_CONSUMER},
-    {"BROWSER_BACK", 0x0224, KEY_TYPE_CONSUMER},
-    {"BROWSER_FORWARD", 0x0225, KEY_TYPE_CONSUMER},
-    // End marker
-    {NULL, 0, KEY_TYPE_KEYBOARD}
-};
-
-// Lookup key by name (case-insensitive for convenience)
-static bool lookup_key(const char *name, uint16_t *code, key_type_t *type)
-{
-    // Check for single character (a-z, 0-9)
-    if (name[0] != '\0' && name[1] == '\0') {
-        char c = name[0];
-        if (c >= 'a' && c <= 'z') {
-            *code = 0x04 + (c - 'a');  // HID_KEY_A = 0x04
-            *type = KEY_TYPE_KEYBOARD;
-            return true;
-        }
-        if (c >= 'A' && c <= 'Z') {
-            *code = 0x04 + (c - 'A');
-            *type = KEY_TYPE_KEYBOARD;
-            return true;
-        }
-        if (c >= '1' && c <= '9') {
-            *code = 0x1E + (c - '1');  // HID_KEY_1 = 0x1E
-            *type = KEY_TYPE_KEYBOARD;
-            return true;
-        }
-        if (c == '0') {
-            *code = 0x27;  // HID_KEY_0
-            *type = KEY_TYPE_KEYBOARD;
-            return true;
-        }
-    }
-
-    // Search table (case-insensitive)
-    for (const key_entry_t *entry = key_table; entry->name != NULL; entry++) {
-        if (strcasecmp(name, entry->name) == 0) {
-            *code = entry->code;
-            *type = entry->type;
-            return true;
-        }
-    }
-
-    // Try parsing as hex number (0x04, 0xE0, etc.)
-    if (name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
-        char *endptr;
-        long val = strtol(name, &endptr, 16);
-        if (*endptr == '\0' && val >= 0 && val <= 0xFFFF) {
-            *code = (uint16_t)val;
-            *type = KEY_TYPE_KEYBOARD;  // Default to keyboard for raw codes
-            return true;
-        }
-    }
-
-    return false;
-}
 
 //--------------------------------------------------------------------+
 // Forward Declarations
@@ -680,7 +468,7 @@ static void mqtt_incoming_data_callback(void *arg, const u8_t *data, u16_t len, 
     }
 }
 
-// Process key message: {"key": "HID_KEY_A", "down": true} or {"key": "a"}
+// Process key message: {"key": "A", "action": "tap"} or {"key": "a"}
 static void mqtt_handle_key(const uint8_t *data, size_t len)
 {
     cJSON *json = cJSON_ParseWithLength((const char *)data, len);
@@ -697,45 +485,47 @@ static void mqtt_handle_key(const uint8_t *data, size_t len)
     }
 
     const char *key_name = key_item->valuestring;
-    uint16_t code;
-    key_type_t type;
+    hid_key_info_t key_info;
 
-    if (!lookup_key(key_name, &code, &type)) {
+    if (!hid_lookup_key(key_name, &key_info)) {
         printf("MQTT: Unknown key '%s'\r\n", key_name);
         cJSON_Delete(json);
         return;
     }
 
-    // Check for "down" field (optional, defaults to tap if not present)
-    cJSON *down_item = cJSON_GetObjectItemCaseSensitive(json, "down");
-    bool has_down = cJSON_IsBool(down_item);
-    bool is_down = has_down ? cJSON_IsTrue(down_item) : true;
+    // Optional type override (for raw hex codes)
+    cJSON *type_item = cJSON_GetObjectItemCaseSensitive(json, "type");
+    if (cJSON_IsString(type_item) && type_item->valuestring != NULL) {
+        const char *type_str = type_item->valuestring;
+        if (strcmp(type_str, "consumer") == 0) {
+            key_info.type = HID_KEY_TYPE_CONSUMER;
+        } else if (strcmp(type_str, "system") == 0) {
+            key_info.type = HID_KEY_TYPE_SYSTEM;
+        } else if (strcmp(type_str, "keyboard") != 0) {
+            printf("MQTT: Invalid type '%s'\r\n", type_str);
+            cJSON_Delete(json);
+            return;
+        }
+    }
 
+    // Parse action (optional, defaults to tap)
+    cJSON *action_item = cJSON_GetObjectItemCaseSensitive(json, "action");
+    const char *action_str = cJSON_IsString(action_item) ? action_item->valuestring : NULL;
+    hid_action_t action;
+    if (!hid_parse_action(action_str, &action)) {
+        printf("MQTT: Invalid action '%s'\r\n", action_str);
+        cJSON_Delete(json);
+        return;
+    }
+
+    const char *type_str = key_info.type == HID_KEY_TYPE_CONSUMER ? "consumer" :
+                           key_info.type == HID_KEY_TYPE_SYSTEM ? "system" : "keyboard";
+    const char *action_names[] = {"tap", "press", "release"};
     printf("MQTT: Key %s (0x%04X, %s) %s\r\n",
-           key_name, code,
-           type == KEY_TYPE_CONSUMER ? "consumer" : "keyboard",
-           has_down ? (is_down ? "down" : "up") : "tap");
+           key_name, key_info.code, type_str, action_names[action]);
 
-    if (type == KEY_TYPE_CONSUMER) {
-        if (!has_down) {
-            // Tap: press and release
-            press_consumer(code);
-            release_consumer();
-        } else if (is_down) {
-            press_consumer(code);
-        } else {
-            release_consumer();
-        }
-    } else {
-        if (!has_down) {
-            // Tap: press and release
-            press_key(code);
-            depress_key(code);
-        } else if (is_down) {
-            press_key(code);
-        } else {
-            depress_key(code);
-        }
+    if (!hid_execute_key(&key_info, action)) {
+        printf("MQTT: System keys not yet implemented\r\n");
     }
 
     cJSON_Delete(json);

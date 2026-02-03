@@ -22,6 +22,7 @@
 #include "ap_mode.h"
 #include "wifi_scan.h"
 #include "usb.h"
+#include "hid_keys.h"
 #include "websocket/websocket.h"
 #include "cjson/cJSON.h"
 
@@ -491,6 +492,8 @@ static int handle_api_hid_result(struct fs_file *file)
 }
 
 // Process POST /api/hid/key
+// Accepts: {"key": "A", "action": "tap"}
+// Key can be: name ("A", "ENTER"), consumer ("VOLUME_UP"), or hex ("0x04")
 static void process_hid_key(void)
 {
     cJSON *json = cJSON_Parse(post_body);
@@ -499,32 +502,46 @@ static void process_hid_key(void)
         return;
     }
 
-    int hid_code;
-    if (!cjson_get_int(json, "code", &hid_code) || hid_code < 0 || hid_code > 255) {
-        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid or missing code");
+    const char *key_name = cjson_get_string(json, "key");
+    if (key_name == NULL) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Missing key field");
         cJSON_Delete(json);
         return;
     }
 
-    const char *action = cjson_get_string(json, "action");
+    hid_key_info_t key_info;
+    if (!hid_lookup_key(key_name, &key_info)) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Unknown key: %s", key_name);
+        cJSON_Delete(json);
+        return;
+    }
 
-    bool do_press = true;
-    bool do_release = true;
-
-    if (action != NULL) {
-        if (strcmp(action, "press") == 0) {
-            do_release = false;
-        } else if (strcmp(action, "release") == 0) {
-            do_press = false;
-        } else if (strcmp(action, "tap") != 0) {
-            snprintf(hid_api_error, sizeof(hid_api_error), "Invalid action");
+    // Optional type override (for raw hex codes)
+    const char *type_str = cjson_get_string(json, "type");
+    if (type_str != NULL) {
+        if (strcmp(type_str, "consumer") == 0) {
+            key_info.type = HID_KEY_TYPE_CONSUMER;
+        } else if (strcmp(type_str, "system") == 0) {
+            key_info.type = HID_KEY_TYPE_SYSTEM;
+        } else if (strcmp(type_str, "keyboard") != 0) {
+            snprintf(hid_api_error, sizeof(hid_api_error), "Invalid type: %s", type_str);
             cJSON_Delete(json);
             return;
         }
     }
 
-    if (do_press) press_key(hid_code);
-    if (do_release) depress_key(hid_code);
+    hid_action_t action;
+    if (!hid_parse_action(cjson_get_string(json, "action"), &action)) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "Invalid action");
+        cJSON_Delete(json);
+        return;
+    }
+
+    if (!hid_execute_key(&key_info, action)) {
+        snprintf(hid_api_error, sizeof(hid_api_error), "System keys not yet implemented");
+        cJSON_Delete(json);
+        return;
+    }
 
     cJSON_Delete(json);
     hid_api_success = true;
