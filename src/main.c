@@ -38,6 +38,7 @@
 #include "websocket/websocket.h"
 #include "mqtt/mqtt.h"
 #include "settings.h"
+#include "syslog.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
 
@@ -335,6 +336,9 @@ int setup_server()
 
     // Initialize MQTT client (will connect when enabled in settings)
     mqtt_init();
+
+    // Initialize syslog (after network is up)
+    syslog_init();
 
     cyw43_arch_lwip_end();
 

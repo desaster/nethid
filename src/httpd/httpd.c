@@ -297,6 +297,11 @@ static int handle_api_settings_get(struct fs_file *file)
     bool mqtt_enabled = settings_get_mqtt_enabled();
     uint16_t mqtt_port = settings_get_mqtt_port();
 
+    // Syslog settings
+    char syslog_server[SYSLOG_SERVER_MAX_LEN + 1];
+    bool has_syslog = settings_get_syslog_server(syslog_server);
+    uint16_t syslog_port_val = settings_get_syslog_port();
+
     cJSON *json = cJSON_CreateObject();
 
     // Hostname as nested object
@@ -312,6 +317,10 @@ static int handle_api_settings_get(struct fs_file *file)
     cJSON_AddStringToObject(json, "mqtt_username", has_username ? mqtt_username : "");
     cJSON_AddBoolToObject(json, "mqtt_has_password", mqtt_has_pass);
     cJSON_AddStringToObject(json, "mqtt_client_id", mqtt_client_id);
+
+    // Syslog settings
+    cJSON_AddStringToObject(json, "syslog_server", has_syslog ? syslog_server : "");
+    cJSON_AddNumberToObject(json, "syslog_port", syslog_port_val);
 
     api_cjson_response(file, json);
     return 1;
@@ -428,6 +437,29 @@ static void process_settings_post(void)
             return;
         }
         settings_set_mqtt_client_id(client_id);
+    }
+
+    // Syslog server
+    const char *syslog_server = cjson_get_string(json, "syslog_server");
+    if (syslog_server) {
+        if (strlen(syslog_server) > SYSLOG_SERVER_MAX_LEN) {
+            snprintf(settings_api_error, sizeof(settings_api_error), "Syslog server too long");
+            cJSON_Delete(json);
+            return;
+        }
+        settings_set_syslog_server(syslog_server);
+    }
+
+    // Syslog port
+    int syslog_port_val;
+    if (cjson_get_int(json, "syslog_port", &syslog_port_val)) {
+        if (syslog_port_val > 0 && syslog_port_val <= 65535) {
+            settings_set_syslog_port((uint16_t)syslog_port_val);
+        } else {
+            snprintf(settings_api_error, sizeof(settings_api_error), "Invalid syslog port");
+            cJSON_Delete(json);
+            return;
+        }
     }
 
     cJSON_Delete(json);

@@ -44,6 +44,10 @@
 #define MQTT_CLIENT_ID_MAX_LEN 31
 #define MQTT_DEFAULT_PORT 1883
 
+// Syslog settings limits
+#define SYSLOG_SERVER_MAX_LEN 15  // IPv4 only: "xxx.xxx.xxx.xxx"
+#define SYSLOG_DEFAULT_PORT 514
+
 // Settings flags bitfield
 #define SETTINGS_FLAG_HOSTNAME       (1 << 0)
 #define SETTINGS_FLAG_MQTT_BROKER    (1 << 1)
@@ -53,6 +57,8 @@
 #define SETTINGS_FLAG_MQTT_PASS      (1 << 5)
 #define SETTINGS_FLAG_MQTT_ENABLED   (1 << 6)
 #define SETTINGS_FLAG_MQTT_CLIENT_ID (1 << 7)
+#define SETTINGS_FLAG_SYSLOG_SERVER  (1 << 8)
+#define SETTINGS_FLAG_SYSLOG_PORT    (1 << 9)
 
 //--------------------------------------------------------------------+
 // Force AP Mode Flag
@@ -161,5 +167,23 @@ bool settings_get_mqtt_client_id(char *client_id);
 
 // Set MQTT client ID (empty string to use hostname as default)
 bool settings_set_mqtt_client_id(const char *client_id);
+
+//--------------------------------------------------------------------+
+// Syslog Settings
+//--------------------------------------------------------------------+
+
+// Get syslog server IP (empty string if not configured)
+// server buffer must be at least SYSLOG_SERVER_MAX_LEN+1 bytes
+// Returns true if configured, false if not set
+bool settings_get_syslog_server(char *server);
+
+// Set syslog server IP (empty string to disable)
+bool settings_set_syslog_server(const char *server);
+
+// Get syslog port (returns default 514 if not configured)
+uint16_t settings_get_syslog_port(void);
+
+// Set syslog port
+bool settings_set_syslog_port(uint16_t port);
 
 #endif

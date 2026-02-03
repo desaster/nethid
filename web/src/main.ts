@@ -56,6 +56,9 @@ interface SettingsResponse {
     mqtt_username: string;
     mqtt_has_password: boolean;
     mqtt_client_id: string;
+    // Syslog settings
+    syslog_server: string;
+    syslog_port: number;
 }
 
 interface MqttSettings {
@@ -66,6 +69,11 @@ interface MqttSettings {
     mqtt_username?: string;
     mqtt_password?: string;
     mqtt_client_id?: string;
+}
+
+interface SyslogSettings {
+    syslog_server?: string;
+    syslog_port?: number;
 }
 
 // Global state
@@ -137,7 +145,7 @@ async function fetchSettings(): Promise<SettingsResponse | null> {
     }
 }
 
-async function saveSettings(settings: { hostname?: string } & MqttSettings): Promise<{ success: boolean; error?: string }> {
+async function saveSettings(settings: { hostname?: string } & MqttSettings & SyslogSettings): Promise<{ success: boolean; error?: string }> {
     try {
         const response = await fetch("/api/settings", {
             method: "POST",
@@ -522,6 +530,29 @@ async function renderSettingsPage(): Promise<void> {
                     </div>
                 </div>
 
+                <div class="settings-section">
+                    <h2>Syslog</h2>
+                    <p class="form-hint">Remote logging via UDP syslog. Requires reboot to apply.</p>
+
+                    <div class="form-group">
+                        <label for="syslog-server">Server IP</label>
+                        <input type="text" id="syslog-server"
+                               value="${escapeHtml(settings.syslog_server)}"
+                               maxlength="15"
+                               placeholder="Leave empty to disable"
+                               pattern="^$|^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$">
+                        <p class="form-hint">IPv4 address only (e.g., 192.168.1.100)</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="syslog-port">Port</label>
+                        <input type="number" id="syslog-port"
+                               value="${settings.syslog_port}"
+                               min="1" max="65535"
+                               placeholder="514">
+                    </div>
+                </div>
+
                 <div id="settings-message" class="status-message"></div>
 
                 <button type="submit" id="save-btn" class="btn-primary">Save Settings</button>
@@ -604,8 +635,12 @@ async function renderSettingsPage(): Promise<void> {
         messageEl.textContent = "Saving...";
         messageEl.className = "status-message status-info";
 
+        // Gather syslog settings
+        const syslogServer = (document.getElementById("syslog-server") as HTMLInputElement).value.trim();
+        const syslogPort = parseInt((document.getElementById("syslog-port") as HTMLInputElement).value) || 514;
+
         // Build settings object
-        const settingsToSave: { hostname: string } & MqttSettings = {
+        const settingsToSave: { hostname: string } & MqttSettings & SyslogSettings = {
             hostname,
             mqtt_enabled: mqttEnabled,
             mqtt_broker: mqttBroker,
@@ -613,6 +648,8 @@ async function renderSettingsPage(): Promise<void> {
             mqtt_topic: mqttTopic,
             mqtt_username: mqttUsername,
             mqtt_client_id: mqttClientId,
+            syslog_server: syslogServer,
+            syslog_port: syslogPort,
         };
 
         // Only include password if it was changed (not empty)

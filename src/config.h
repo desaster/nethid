@@ -26,6 +26,11 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
-#define VIRTUAL_BLINKY 1
+// Print periodic loop status to serial (visual heartbeat when watching serial output)
+#define VIRTUAL_BLINKY 0
+
+// Mirror all printf output to syslog server (when syslog is configured)
+// Set to 0 to disable automatic mirroring - you can still use SYSLOG_INFO/WARNING/ERR macros
+#define SYSLOG_MIRROR_PRINTF 1
 
 #endif

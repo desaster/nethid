@@ -34,6 +34,7 @@ add_executable(${TARGET}
     src/websocket/websocket.c
     src/mqtt/mqtt.c
     src/settings.c
+    src/syslog.c
     src/ap_mode.c
     src/dhcpserver.c
     src/wifi_scan.c

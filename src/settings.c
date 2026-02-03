@@ -40,8 +40,8 @@
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic value to identify valid config (version 4 with MQTT settings)
-#define CONFIG_MAGIC 0x4E455434  // "NET4" (version 4)
+// Magic value to identify valid config (version 5 with syslog settings)
+#define CONFIG_MAGIC 0x4E455435  // "NET5" (version 5)
 
 // Config structure stored in flash
 typedef struct {
@@ -61,6 +61,9 @@ typedef struct {
     char mqtt_username[MQTT_USERNAME_MAX_LEN + 1];  // null-terminated
     char mqtt_password[MQTT_PASSWORD_MAX_LEN + 1];  // null-terminated
     char mqtt_client_id[MQTT_CLIENT_ID_MAX_LEN + 1]; // null-terminated
+    // Syslog settings (added in version 5)
+    char syslog_server[SYSLOG_SERVER_MAX_LEN + 1];  // null-terminated IPv4
+    uint16_t syslog_port;
     uint8_t reserved_settings[64];              // Future settings space
     uint32_t checksum;
 } flash_config_t;
@@ -129,6 +132,8 @@ static void init_fresh_config(flash_config_t *cfg)
     cfg->has_credentials = 0;
     cfg->mqtt_enabled = 0;
     cfg->mqtt_port = MQTT_DEFAULT_PORT;
+    cfg->syslog_server[0] = '\0';
+    cfg->syslog_port = SYSLOG_DEFAULT_PORT;
 }
 
 //--------------------------------------------------------------------+
@@ -705,5 +710,99 @@ bool settings_set_mqtt_client_id(const char *client_id)
     write_config(&cfg);
 
     printf("MQTT client ID %s\r\n", len > 0 ? "saved" : "cleared (using hostname)");
+    return true;
+}
+
+//--------------------------------------------------------------------+
+// Syslog Settings
+//--------------------------------------------------------------------+
+
+bool settings_get_syslog_server(char *server)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        server[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_SYSLOG_SERVER) || cfg.syslog_server[0] == '\0') {
+        server[0] = '\0';
+        return false;
+    }
+
+    strncpy(server, cfg.syslog_server, SYSLOG_SERVER_MAX_LEN);
+    server[SYSLOG_SERVER_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_syslog_server(const char *server)
+{
+    if (server == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(server);
+    if (len > SYSLOG_SERVER_MAX_LEN) {
+        printf("Syslog server too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.syslog_server, 0, sizeof(cfg.syslog_server));
+    if (len > 0) {
+        strncpy(cfg.syslog_server, server, SYSLOG_SERVER_MAX_LEN);
+        cfg.settings_flags |= SETTINGS_FLAG_SYSLOG_SERVER;
+    } else {
+        cfg.settings_flags &= ~SETTINGS_FLAG_SYSLOG_SERVER;
+    }
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("Syslog server %s\r\n", len > 0 ? "saved" : "cleared");
+    return true;
+}
+
+uint16_t settings_get_syslog_port(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return SYSLOG_DEFAULT_PORT;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_SYSLOG_PORT) || cfg.syslog_port == 0) {
+        return SYSLOG_DEFAULT_PORT;
+    }
+
+    return cfg.syslog_port;
+}
+
+bool settings_set_syslog_port(uint16_t port)
+{
+    if (port == 0) {
+        printf("Invalid syslog port: 0\r\n");
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    cfg.syslog_port = port;
+    cfg.settings_flags |= SETTINGS_FLAG_SYSLOG_PORT;
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("Syslog port saved: %u\r\n", port);
     return true;
 }
