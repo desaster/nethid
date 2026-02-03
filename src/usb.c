@@ -36,6 +36,7 @@
 
 #include "board.h"
 #include "config.h"
+#include "websocket/websocket.h"
 
 queue_t fifo_keyboard;
 queue_t fifo_mouse;
@@ -57,22 +58,27 @@ typedef struct {
 // Invoked when device is mounted
 void tud_mount_cb(void)
 {
+    printf("USB: Mount callback\r\n");
     // initialize a fifo queue of hid reports
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
     queue_init(&fifo_mouse, sizeof(mouse_data), 128);
     queue_init(&fifo_consumer, sizeof(uint16_t), 32);
     usb_mounted = true;
+    usb_suspended = false;  // Clear suspended flag on mount
     update_blink_state();
+    websocket_send_status();
 }
 
 // Invoked when device is unmounted
 void tud_umount_cb(void)
 {
+    printf("USB: Unmount callback\r\n");
     queue_free(&fifo_keyboard);
     queue_free(&fifo_mouse);
     queue_free(&fifo_consumer);
     usb_mounted = false;
     update_blink_state();
+    websocket_send_status();
 }
 
 // Invoked when usb bus is suspended
@@ -80,16 +86,20 @@ void tud_umount_cb(void)
 // Within 7ms, device must draw an average of current less than 2.5 mA from bus
 void tud_suspend_cb(bool remote_wakeup_en)
 {
+    printf("USB: Suspend callback (remote_wakeup_en=%d)\r\n", remote_wakeup_en);
     (void) remote_wakeup_en;
     usb_suspended = true;
     update_blink_state();
+    websocket_send_status();
 }
 
 // Invoked when usb bus is resumed
 void tud_resume_cb(void)
 {
+    printf("USB: Resume callback\r\n");
     usb_suspended = false;
     update_blink_state();
+    websocket_send_status();
 }
 
 //
