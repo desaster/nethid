@@ -39,20 +39,30 @@
 #include "websocket/websocket.h"
 
 queue_t fifo_keyboard;
-queue_t fifo_mouse;
 queue_t fifo_consumer;
 queue_t fifo_system;
+
+// Mouse accumulator: movement deltas are summed and drained ±127 per HID report.
+// This avoids queue overflow during fast/high-sensitivity mouse movement.
+static struct {
+    int32_t dx;
+    int32_t dy;
+    int32_t vertical;
+    int32_t horizontal;
+    uint8_t buttons;
+    uint8_t last_sent_buttons;
+} mouse_acc = {0};
+
+static bool mouse_has_pending(void)
+{
+    return mouse_acc.dx != 0 || mouse_acc.dy != 0 ||
+           mouse_acc.vertical != 0 || mouse_acc.horizontal != 0 ||
+           mouse_acc.buttons != mouse_acc.last_sent_buttons;
+}
 
 static bool remote_wakeup_enabled = false;
 
 uint8_t keycodes[6] = { 0, 0, 0, 0, 0, 0 };
-typedef struct {
-    uint8_t buttons;
-    int8_t x;
-    int8_t y;
-    int8_t vertical;
-    int8_t horizontal;
-} mouse_data;
 
 //
 // Device callbacks
@@ -62,11 +72,11 @@ typedef struct {
 void tud_mount_cb(void)
 {
     printf("USB: Mount callback\r\n");
-    // initialize a fifo queue of hid reports
+    // initialize fifo queues for discrete HID reports
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
-    queue_init(&fifo_mouse, sizeof(mouse_data), 128);
     queue_init(&fifo_consumer, sizeof(uint16_t), 32);
     queue_init(&fifo_system, sizeof(uint8_t), 32);
+    memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = true;
     usb_suspended = false;
     remote_wakeup_enabled = false;
@@ -79,9 +89,9 @@ void tud_umount_cb(void)
 {
     printf("USB: Unmount callback\r\n");
     queue_free(&fifo_keyboard);
-    queue_free(&fifo_mouse);
     queue_free(&fifo_consumer);
     queue_free(&fifo_system);
+    memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = false;
     remote_wakeup_enabled = false;
     update_blink_state();
@@ -171,18 +181,13 @@ void depress_key(uint16_t key)
     }
 }
 
-void move_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t vertical, int8_t horizontal)
+void move_mouse(uint8_t buttons, int16_t x, int16_t y, int16_t vertical, int16_t horizontal)
 {
-    mouse_data data = {
-        .buttons = buttons,
-        .x = x,
-        .y = y,
-        .vertical = vertical,
-        .horizontal = horizontal
-    };
-    if (!queue_try_add(&fifo_mouse, &data)) {
-        printf("Mouse report queue full!\r\n");
-    }
+    mouse_acc.buttons = buttons;
+    mouse_acc.dx += x;
+    mouse_acc.dy += y;
+    mouse_acc.vertical += vertical;
+    mouse_acc.horizontal += horizontal;
 }
 
 void press_consumer(uint16_t code)
@@ -221,42 +226,36 @@ void release_system(void)
 // private function for sending updated usb packet
 //
 
+static inline int8_t clamp8(int16_t v)
+{
+    return v > 127 ? 127 : (v < -127 ? -127 : (int8_t)v);
+}
+
 static void send_events(int report_id)
 {
     uint8_t new_keycodes[6] = { 0, 0, 0, 0, 0, 0 };
-    mouse_data new_mouse_data = { 
-        .buttons = 0,
-        .x = 0,
-        .y = 0,
-        .vertical = 0,
-        .horizontal = 0
-    };
 
     if (report_id == REPORT_ID_KEYBOARD && !queue_is_empty(&fifo_keyboard)) {
         if (queue_try_remove(&fifo_keyboard, &new_keycodes)) {
-            // printf("Sending keyboard data: ");
-            // for (int i = 0; i < 6; i++) {
-            //     printf("%02x ", new_keycodes[i]);
-            // }
-            // printf("\r\n");
             tud_hid_keyboard_report(
                     REPORT_ID_KEYBOARD,
                     0,  // modifiers
                     new_keycodes);
         }
-    } else if (report_id == REPORT_ID_MOUSE && !queue_is_empty(&fifo_mouse)) {
-        if (queue_try_remove(&fifo_mouse, &new_mouse_data)) {
-            // printf("Sending mouse data: xrel: %d, yrel: %d\r\n",
-            //         new_mouse_data.x,
-            //         new_mouse_data.y);
-            tud_hid_mouse_report(
-                    REPORT_ID_MOUSE,
-                    new_mouse_data.buttons,
-                    new_mouse_data.x,
-                    new_mouse_data.y,
-                    new_mouse_data.vertical,
-                    new_mouse_data.horizontal);
-        }
+    } else if (report_id == REPORT_ID_MOUSE && mouse_has_pending()) {
+        int8_t cx = clamp8(mouse_acc.dx);
+        int8_t cy = clamp8(mouse_acc.dy);
+        int8_t cv = clamp8(mouse_acc.vertical);
+        int8_t ch = clamp8(mouse_acc.horizontal);
+        tud_hid_mouse_report(
+                REPORT_ID_MOUSE,
+                mouse_acc.buttons,
+                cx, cy, cv, ch);
+        mouse_acc.dx -= cx;
+        mouse_acc.dy -= cy;
+        mouse_acc.vertical -= cv;
+        mouse_acc.horizontal -= ch;
+        mouse_acc.last_sent_buttons = mouse_acc.buttons;
     } else if (report_id == REPORT_ID_CONSUMER_CONTROL && !queue_is_empty(&fifo_consumer)) {
         uint16_t code;
         if (queue_try_remove(&fifo_consumer, &code)) {
@@ -292,7 +291,7 @@ void hid_task(void)
     // (tud_hid_ready() returns false when suspended, so we'd never reach wakeup logic)
     if (tud_suspended() &&
             (!queue_is_empty(&fifo_keyboard) ||
-             !queue_is_empty(&fifo_mouse) ||
+             mouse_has_pending() ||
              !queue_is_empty(&fifo_consumer) ||
              !queue_is_empty(&fifo_system))) {
         // Wake up host if we are in suspend mode
@@ -318,7 +317,7 @@ void hid_task(void)
         send_events(REPORT_ID_CONSUMER_CONTROL);
     } else if (!queue_is_empty(&fifo_system)) {
         send_events(REPORT_ID_SYSTEM_CONTROL);
-    } else if (!queue_is_empty(&fifo_mouse)) {
+    } else if (mouse_has_pending()) {
         send_events(REPORT_ID_MOUSE);
     }
 }

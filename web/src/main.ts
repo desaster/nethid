@@ -17,6 +17,29 @@ function setLayoutPreset(preset: LayoutPreset): void {
     localStorage.setItem(LAYOUT_PRESET_KEY, preset);
 }
 
+// Mouse sensitivity storage
+const MOUSE_SENSITIVITY_KEY = 'nethid-mouse-sensitivity';
+const MOUSE_SENSITIVITY_PRESETS = [
+    { label: 'Slow', value: 1 },
+    { label: 'Normal', value: 2 },
+    { label: 'Fast', value: 3 },
+    { label: 'Very Fast', value: 5 },
+];
+const DEFAULT_MOUSE_SENSITIVITY = 2;
+
+function getMouseSensitivity(): number {
+    const stored = localStorage.getItem(MOUSE_SENSITIVITY_KEY);
+    if (stored !== null) {
+        const val = parseFloat(stored);
+        if (!isNaN(val) && val >= 1 && val <= 10) return val;
+    }
+    return DEFAULT_MOUSE_SENSITIVITY;
+}
+
+function setMouseSensitivity(value: number): void {
+    localStorage.setItem(MOUSE_SENSITIVITY_KEY, String(value));
+}
+
 interface DeviceStatus {
     hostname: string;
     mac: string;
@@ -249,7 +272,15 @@ function renderControlPage(): void {
             <div class="control-header">
                 <button id="back-btn" class="btn-small">Back</button>
                 <span id="connection-status" class="connection-status">Disconnected</span>
-                <button id="fullscreen-btn" class="btn-small">Fullscreen</button>
+                <div class="header-controls">
+                    <label for="sensitivity-select" class="sensitivity-label">Mouse speed</label>
+                    <select id="sensitivity-select" class="sensitivity-select" title="Mouse speed">
+                        ${MOUSE_SENSITIVITY_PRESETS.map(p =>
+                            `<option value="${p.value}" ${p.value === getMouseSensitivity() ? 'selected' : ''}>${p.label}</option>`
+                        ).join('')}
+                    </select>
+                    <button id="fullscreen-btn" class="btn-small">Fullscreen</button>
+                </div>
             </div>
             <div id="capture-zone" class="capture-zone ${isTouch ? 'touch-mode' : ''}">
                 <div class="capture-content">
@@ -398,6 +429,28 @@ function setupHIDControl(isTouch: boolean): void {
                 .join("");
         }
     }
+
+    // Setup mouse sensitivity control
+    const sensitivitySelect = document.getElementById('sensitivity-select') as HTMLSelectElement;
+    const currentSensitivity = getMouseSensitivity();
+
+    if (inputCapture) {
+        inputCapture.setSensitivity(currentSensitivity);
+    }
+    if (touchTrackpad) {
+        touchTrackpad.setSensitivity(1.5 * currentSensitivity);
+    }
+
+    sensitivitySelect?.addEventListener('change', () => {
+        const newValue = parseFloat(sensitivitySelect.value);
+        setMouseSensitivity(newValue);
+        if (inputCapture) {
+            inputCapture.setSensitivity(newValue);
+        }
+        if (touchTrackpad) {
+            touchTrackpad.setSensitivity(1.5 * newValue);
+        }
+    });
 
     // Setup virtual keyboard
     const keyboardSection = document.getElementById("keyboard-section")!;

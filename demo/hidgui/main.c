@@ -90,35 +90,42 @@ void send_keyboard(uint8_t pressed, uint8_t scancode)
     close(sockfd);
 }
 
+static int8_t clamp8(int v)
+{
+    return v > 127 ? 127 : (v < -127 ? -127 : (int8_t)v);
+}
+
 void send_mouse(
     uint8_t buttons,
-    int8_t x,
-    int8_t y,
-    int8_t vertical,
-    int8_t horizontal)
+    int x,
+    int y,
+    int vertical,
+    int horizontal)
 {
-    int sockfd;
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    // Split large movements into multiple packets to avoid int8 overflow
+    do {
+        mouse_packet packet;
+        packet.type = 2; // 2 == mouse
+        packet.version = 1;
+        packet.buttons = buttons;
+        packet.x = clamp8(x);
+        packet.y = clamp8(y);
+        packet.vertical = clamp8(vertical);
+        packet.horizontal = clamp8(horizontal);
 
-    mouse_packet packet;
-    packet.type = 2; // 2 == mouse
-    packet.version = 1;
-    packet.buttons = buttons;
-    packet.x = x;
-    packet.y = y;
-    packet.vertical = vertical;
-    packet.horizontal = horizontal;
+        if (sendto(sockfd, &packet, sizeof(packet), 0,
+                (struct sockaddr *) &target_addr, sizeof(target_addr)) < 0) {
+            printf("Error sending packet\n");
+            break;
+        }
 
-    if (sendto(
-            sockfd,
-            &packet,
-            sizeof(packet),
-            0,
-            (struct sockaddr *) &target_addr,
-            sizeof(target_addr)) < 0) {
-        printf("Error sending packet\n");
-    }
+        x -= packet.x;
+        y -= packet.y;
+        vertical -= packet.vertical;
+        horizontal -= packet.horizontal;
+    } while (x != 0 || y != 0 || vertical != 0 || horizontal != 0);
 
     close(sockfd);
 }
@@ -147,7 +154,8 @@ int main()
 #endif
 
     SDL_SetWindowGrab(window, SDL_TRUE);
-    SDL_SetRelativeMouseMode(SDL_TRUE);
+    SDL_ShowCursor(SDL_DISABLE);
+    SDL_WarpMouseInWindow(window, 320, 240);
 
     if (window == NULL) {
         printf("Could not create window: %s\n", SDL_GetError());
@@ -244,10 +252,15 @@ int main()
 
                 break;
 
-            case SDL_MOUSEMOTION:
-                // printf("Mouse moved: %d, %d\n", event.motion.xrel, event.motion.yrel);
-                send_mouse(mouse_buttons, event.motion.xrel, event.motion.yrel, 0, 0);
+            case SDL_MOUSEMOTION: {
+                int dx = event.motion.x - 320;
+                int dy = event.motion.y - 240;
+                if (dx != 0 || dy != 0) {
+                    send_mouse(mouse_buttons, dx, dy, 0, 0);
+                    SDL_WarpMouseInWindow(window, 320, 240);
+                }
                 break;
+            }
             default:
                 break;
         }

@@ -180,6 +180,12 @@ static ws_state_t ws_state = WS_STATE_IDLE;
 static char http_buffer[HTTP_BUFFER_SIZE];
 static size_t http_buffer_len = 0;
 
+// Receive buffer for WebSocket frame reassembly
+// (TCP may deliver multiple frames in one segment or split a frame across segments)
+#define WS_RECV_BUFFER_SIZE 512
+static uint8_t ws_recv_buffer[WS_RECV_BUFFER_SIZE];
+static size_t ws_recv_buffer_len = 0;
+
 // Current mouse button state (track for release-all)
 static uint8_t current_buttons = 0;
 
@@ -197,7 +203,8 @@ static err_t ws_sent(void *arg, struct tcp_pcb *tpcb, u16_t len);
 
 static bool process_http_handshake(struct tcp_pcb *pcb);
 static bool compute_accept_key(const char *client_key, char *accept_key, size_t accept_key_size);
-static void process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, size_t len);
+static size_t process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, size_t len);
+static void process_ws_recv_buffer(struct tcp_pcb *pcb);
 static void process_hid_command(const uint8_t *payload, size_t len);
 static void send_close_frame(struct tcp_pcb *pcb);
 static void send_close_frame_with_code(struct tcp_pcb *pcb, uint16_t code, const char *reason);
@@ -321,6 +328,7 @@ static err_t ws_accept(void *arg, struct tcp_pcb *newpcb, err_t err)
     ws_client_pcb = newpcb;
     ws_state = WS_STATE_HTTP_HANDSHAKE;
     http_buffer_len = 0;
+    ws_recv_buffer_len = 0;
 
     tcp_arg(newpcb, NULL);
     tcp_recv(newpcb, ws_recv);
@@ -378,14 +386,27 @@ static err_t ws_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
             }
         }
     } else if (ws_state == WS_STATE_CONNECTED) {
-        // Process WebSocket frames
+        // Append all pbuf data to reassembly buffer, then process complete frames
         struct pbuf *q;
         for (q = p; q != NULL; q = q->next) {
-            process_websocket_frame(tpcb, (const uint8_t *)q->payload, q->len);
+            size_t copy_len = q->len;
+            if (ws_recv_buffer_len + copy_len > WS_RECV_BUFFER_SIZE) {
+                copy_len = WS_RECV_BUFFER_SIZE - ws_recv_buffer_len;
+            }
+            if (copy_len > 0) {
+                memcpy(ws_recv_buffer + ws_recv_buffer_len, q->payload, copy_len);
+                ws_recv_buffer_len += copy_len;
+            }
         }
+        process_ws_recv_buffer(tpcb);
     }
 
-    tcp_recved(tpcb, p->tot_len);
+    // Only acknowledge data if connection is still open.
+    // Processing may have closed the connection (e.g., close frame or handshake failure),
+    // in which case the PCB is already freed and we must not touch it.
+    if (ws_client_pcb != NULL) {
+        tcp_recved(tpcb, p->tot_len);
+    }
     pbuf_free(p);
 
     return ERR_OK;
@@ -506,10 +527,13 @@ static bool compute_accept_key(const char *client_key, char *accept_key, size_t 
 // WebSocket Frame Processing
 //--------------------------------------------------------------------+
 
-static void process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, size_t len)
+// Process a single WebSocket frame from the buffer.
+// Returns the total number of bytes consumed (header + payload), or 0 if
+// the buffer does not yet contain a complete frame.
+static size_t process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, size_t len)
 {
     if (len < 2) {
-        return;
+        return 0;  // need more data
     }
 
     // Parse frame header
@@ -522,35 +546,35 @@ static void process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, si
 
     // Extended payload length
     if (payload_len == 126) {
-        if (len < 4) return;
+        if (len < 4) return 0;
         payload_len = (data[2] << 8) | data[3];
         header_len = 4;
     } else if (payload_len == 127) {
         // 64-bit length - not supported for our use case
         printf("WebSocket: 64-bit payload length not supported\r\n");
-        return;
+        return len;  // discard everything
     }
 
     // Masking key (client frames must be masked)
     uint8_t mask[4] = {0, 0, 0, 0};
     if (masked) {
-        if (len < header_len + 4) return;
+        if (len < header_len + 4) return 0;
         memcpy(mask, data + header_len, 4);
         header_len += 4;
     }
 
+    size_t frame_len = header_len + payload_len;
+
     // Check we have complete payload
-    if (len < header_len + payload_len) {
-        printf("WebSocket: Incomplete frame (have %zu, need %zu)\r\n",
-               len, header_len + payload_len);
-        return;
+    if (len < frame_len) {
+        return 0;  // need more data
     }
 
     // Unmask payload
     uint8_t payload[WS_FRAME_BUFFER_SIZE];
     if (payload_len > WS_FRAME_BUFFER_SIZE) {
         printf("WebSocket: Payload too large (%zu)\r\n", payload_len);
-        return;
+        return frame_len;  // skip this frame
     }
 
     for (size_t i = 0; i < payload_len; i++) {
@@ -596,6 +620,25 @@ static void process_websocket_frame(struct tcp_pcb *pcb, const uint8_t *data, si
             printf("WebSocket: Unknown opcode 0x%02x\r\n", opcode);
             break;
     }
+
+    return frame_len;
+}
+
+// Process all complete WebSocket frames in the receive buffer
+static void process_ws_recv_buffer(struct tcp_pcb *pcb)
+{
+    while (ws_recv_buffer_len > 0 && ws_state == WS_STATE_CONNECTED) {
+        size_t consumed = process_websocket_frame(pcb, ws_recv_buffer, ws_recv_buffer_len);
+        if (consumed == 0) {
+            break;  // incomplete frame, wait for more data
+        }
+        if (consumed >= ws_recv_buffer_len) {
+            ws_recv_buffer_len = 0;
+        } else {
+            ws_recv_buffer_len -= consumed;
+            memmove(ws_recv_buffer, ws_recv_buffer + consumed, ws_recv_buffer_len);
+        }
+    }
 }
 
 //--------------------------------------------------------------------+
@@ -629,12 +672,7 @@ static void process_hid_command(const uint8_t *payload, size_t len)
             if (len >= 5) {
                 int16_t dx = (int16_t)(payload[1] | (payload[2] << 8));
                 int16_t dy = (int16_t)(payload[3] | (payload[4] << 8));
-                // Clamp to int8_t range for move_mouse
-                if (dx < -127) dx = -127;
-                if (dx > 127) dx = 127;
-                if (dy < -127) dy = -127;
-                if (dy > 127) dy = 127;
-                move_mouse(current_buttons, (int8_t)dx, (int8_t)dy, 0, 0);
+                move_mouse(current_buttons, dx, dy, 0, 0);
             }
             break;
 
@@ -749,4 +787,5 @@ static void close_connection(void)
 
     ws_state = WS_STATE_IDLE;
     http_buffer_len = 0;
+    ws_recv_buffer_len = 0;
 }

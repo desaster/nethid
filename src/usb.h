@@ -39,7 +39,7 @@ void tud_suspend_cb(bool remote_wakeup_en);
 void tud_resume_cb(void);
 void press_key(uint16_t key);
 void depress_key(uint16_t key);
-void move_mouse(uint8_t buttons, int8_t x, int8_t y, int8_t vertical, int8_t horizontal);
+void move_mouse(uint8_t buttons, int16_t x, int16_t y, int16_t vertical, int16_t horizontal);
 void press_consumer(uint16_t code);
 void release_consumer(void);
 void press_system(uint16_t code);

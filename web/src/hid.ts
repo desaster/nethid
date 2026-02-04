@@ -320,6 +320,7 @@ export class InputCapture {
     private pendingDx = 0;
     private pendingDy = 0;
     private moveTimer: number | null = null;
+    private sensitivity = 1;
 
     constructor(element: HTMLElement, client: HIDClient, callbacks: InputCaptureCallbacks = {}) {
         this.element = element;
@@ -327,6 +328,10 @@ export class InputCapture {
         this.callbacks = callbacks;
 
         this.setupEventListeners();
+    }
+
+    setSensitivity(value: number): void {
+        this.sensitivity = value;
     }
 
     private setupEventListeners(): void {
@@ -435,10 +440,11 @@ export class InputCapture {
 
     private flushMouseMove(): void {
         this.moveTimer = null;
+
         if (this.pendingDx !== 0 || this.pendingDy !== 0) {
-            // Clamp to int16 range
-            const dx = Math.max(-32768, Math.min(32767, this.pendingDx));
-            const dy = Math.max(-32768, Math.min(32767, this.pendingDy));
+            // Apply sensitivity multiplier, then clamp to int16 range
+            const dx = Math.max(-32768, Math.min(32767, Math.round(this.pendingDx * this.sensitivity)));
+            const dy = Math.max(-32768, Math.min(32767, Math.round(this.pendingDy * this.sensitivity)));
             this.client.sendMouseMove(dx, dy);
             this.pendingDx = 0;
             this.pendingDy = 0;
@@ -511,6 +517,10 @@ export class TouchTrackpad {
         this.element = element;
         this.client = client;
         this.setupEventListeners();
+    }
+
+    setSensitivity(value: number): void {
+        this.sensitivity = value;
     }
 
     private setupEventListeners(): void {

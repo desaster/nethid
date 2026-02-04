@@ -353,6 +353,32 @@ button:hover {
     color: var(--warning);
 }
 
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sensitivity-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.sensitivity-select {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.sensitivity-select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .capture-zone {
     flex: 1;
     display: flex;

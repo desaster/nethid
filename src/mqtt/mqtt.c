@@ -547,13 +547,13 @@ static void mqtt_handle_mouse_move(const uint8_t *data, size_t len)
     if (cJSON_IsNumber(x_item)) x = x_item->valueint;
     if (cJSON_IsNumber(y_item)) y = y_item->valueint;
 
-    // Clamp to int8 range
-    if (x < -127) x = -127;
-    if (x > 127) x = 127;
-    if (y < -127) y = -127;
-    if (y > 127) y = 127;
+    // Clamp to int16 range, then split into int8-sized HID reports
+    if (x < -32768) x = -32768;
+    if (x > 32767) x = 32767;
+    if (y < -32768) y = -32768;
+    if (y > 32767) y = 32767;
 
-    move_mouse(mqtt_mouse_buttons, (int8_t)x, (int8_t)y, 0, 0);
+    move_mouse(mqtt_mouse_buttons, (int16_t)x, (int16_t)y, 0, 0);
 
     cJSON_Delete(json);
 }
