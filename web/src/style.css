@@ -469,6 +469,7 @@ button:hover {
 /* Touch mode styles */
 .capture-zone.touch-mode {
     cursor: default;
+    touch-action: none;
 }
 
 .touch-hints {

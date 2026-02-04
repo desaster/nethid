@@ -321,6 +321,7 @@ function renderControlPage(): void {
                         <span>Drag: move</span>
                         <span>Tap: click</span>
                         <span>2-finger tap: right-click</span>
+                        <span>Tap+hold+drag: click &amp; drag</span>
                     </div>
                 ` : `
                     <div class="modifiers-display" id="modifiers-display"></div>
@@ -532,7 +533,6 @@ function cleanupControl(): void {
     keyboardManager = null;
     inputCapture?.destroy();
     inputCapture = null;
-    touchTrackpad?.destroy();
     touchTrackpad = null;
     hidClient?.disconnect();
     hidClient = null;

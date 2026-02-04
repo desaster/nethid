@@ -316,11 +316,11 @@ export class InputCapture {
     private heldKeys = new Set<string>();
     private heldModifiers = new Set<string>();
 
-    // Mouse movement batching
     private pendingDx = 0;
     private pendingDy = 0;
     private moveTimer: number | null = null;
     private sensitivity = 1;
+    private abortController = new AbortController();
 
     constructor(element: HTMLElement, client: HIDClient, callbacks: InputCaptureCallbacks = {}) {
         this.element = element;
@@ -335,14 +335,14 @@ export class InputCapture {
     }
 
     private setupEventListeners(): void {
-        // Click to capture
+        const sig = { signal: this.abortController.signal };
+
         this.element.addEventListener('click', () => {
             if (!this.captured) {
                 this.element.requestPointerLock();
             }
-        });
+        }, sig);
 
-        // Pointer lock change
         document.addEventListener('pointerlockchange', () => {
             this.captured = document.pointerLockElement === this.element;
             this.callbacks.onCaptureChange?.(this.captured);
@@ -350,34 +350,29 @@ export class InputCapture {
                 this.client.sendReleaseAll();
                 this.clearHeldKeys();
             }
-        });
+        }, sig);
 
-        // Keyboard events
-        document.addEventListener('keydown', (e) => this.handleKeyDown(e));
-        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+        document.addEventListener('keydown', (e) => this.handleKeyDown(e), sig);
+        document.addEventListener('keyup', (e) => this.handleKeyUp(e), sig);
 
-        // Mouse events
-        this.element.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        this.element.addEventListener('mousedown', (e) => this.handleMouseButton(e, true));
-        this.element.addEventListener('mouseup', (e) => this.handleMouseButton(e, false));
-        this.element.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+        this.element.addEventListener('mousemove', (e) => this.handleMouseMove(e), sig);
+        this.element.addEventListener('mousedown', (e) => this.handleMouseButton(e, true), sig);
+        this.element.addEventListener('mouseup', (e) => this.handleMouseButton(e, false), sig);
+        this.element.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false, ...sig });
 
-        // Prevent context menu on right-click
         this.element.addEventListener('contextmenu', (e) => {
             if (this.captured) e.preventDefault();
-        });
+        }, sig);
 
-        // Release all on page unload
         window.addEventListener('beforeunload', () => {
             this.client.sendReleaseAll();
-        });
+        }, sig);
 
-        // Release all on visibility change (tab switch)
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 this.client.sendReleaseAll();
             }
-        });
+        }, sig);
     }
 
     private handleKeyDown(e: KeyboardEvent): void {
@@ -485,6 +480,7 @@ export class InputCapture {
 
     destroy(): void {
         this.release();
+        this.abortController.abort();
         if (this.moveTimer) {
             clearTimeout(this.moveTimer);
         }
@@ -496,7 +492,6 @@ export class InputCapture {
  * Gestures:
  * - Single finger drag: mouse move
  * - Single tap: left click
- * - Double tap: double click
  * - Two finger tap: right click
  * - Two finger drag: scroll
  */
@@ -504,13 +499,11 @@ export class TouchTrackpad {
     private element: HTMLElement;
     private client: HIDClient;
 
-    // Touch state
     private touches: Map<number, { x: number; y: number; startX: number; startY: number }> = new Map();
+    private fingerCount = 0;
+    private tapTimer: number | null = null;
     private lastTapTime = 0;
-    private tapTimeout: number | null = null;
-    private moved = false;
-
-    // Sensitivity multiplier
+    private dragging = false;
     private sensitivity = 1.5;
 
     constructor(element: HTMLElement, client: HIDClient) {
@@ -533,6 +526,21 @@ export class TouchTrackpad {
     private handleTouchStart(e: TouchEvent): void {
         e.preventDefault();
 
+        // New touch during grace period — gesture continues
+        if (this.tapTimer !== null) {
+            clearTimeout(this.tapTimer);
+            this.tapTimer = null;
+        }
+
+        // Tap-and-drag: touch arriving shortly after a tap holds the button
+        if (!this.dragging && this.lastTapTime > 0 &&
+            e.changedTouches.length === 1 &&
+            Date.now() - this.lastTapTime < 200) {
+            this.dragging = true;
+            this.lastTapTime = 0;
+            this.client.sendMouseButton(0, true);
+        }
+
         for (const touch of Array.from(e.changedTouches)) {
             this.touches.set(touch.identifier, {
                 x: touch.clientX,
@@ -541,11 +549,29 @@ export class TouchTrackpad {
                 startY: touch.clientY,
             });
         }
-        this.moved = false;
+        if (!this.dragging) {
+            this.fingerCount += e.changedTouches.length;
+        }
     }
 
     private handleTouchMove(e: TouchEvent): void {
         e.preventDefault();
+
+        // During drag, only track single-finger movement
+        if (this.dragging) {
+            const touch = e.changedTouches[0];
+            const state = this.touches.get(touch.identifier);
+            if (state) {
+                const dx = (touch.clientX - state.x) * this.sensitivity;
+                const dy = (touch.clientY - state.y) * this.sensitivity;
+                if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                    this.client.sendMouseMove(Math.round(dx), Math.round(dy));
+                }
+                state.x = touch.clientX;
+                state.y = touch.clientY;
+            }
+            return;
+        }
 
         const touchCount = this.touches.size;
 
@@ -559,7 +585,6 @@ export class TouchTrackpad {
 
                 if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
                     this.client.sendMouseMove(Math.round(dx), Math.round(dy));
-                    this.moved = true;
                 }
 
                 state.x = touch.clientX;
@@ -580,7 +605,6 @@ export class TouchTrackpad {
             const scrollY = Math.round(-totalDy / 20);
             if (scrollY !== 0) {
                 this.client.sendScroll(0, scrollY);
-                this.moved = true;
             }
         }
     }
@@ -588,56 +612,48 @@ export class TouchTrackpad {
     private handleTouchEnd(e: TouchEvent): void {
         e.preventDefault();
 
-        const touchCount = this.touches.size;
-        const now = Date.now();
-
-        // Check for tap gestures (no significant movement)
-        if (!this.moved) {
-            if (touchCount === 1) {
-                // Single finger tap
-                const timeSinceLastTap = now - this.lastTapTime;
-
-                if (timeSinceLastTap < 300) {
-                    // Double tap - cancel pending single tap and do double click
-                    if (this.tapTimeout) {
-                        clearTimeout(this.tapTimeout);
-                        this.tapTimeout = null;
-                    }
-                    this.client.sendMouseButton(0, true);
-                    this.client.sendMouseButton(0, false);
-                    this.client.sendMouseButton(0, true);
-                    this.client.sendMouseButton(0, false);
-                    this.lastTapTime = 0;
-                } else {
-                    // Potential single tap - delay to check for double tap
-                    this.lastTapTime = now;
-                    this.tapTimeout = window.setTimeout(() => {
-                        this.tapTimeout = null;
-                        this.client.sendMouseButton(0, true);
-                        this.client.sendMouseButton(0, false);
-                    }, 200);
-                }
-            } else if (touchCount === 2) {
-                // Two finger tap: right click
-                if (this.tapTimeout) {
-                    clearTimeout(this.tapTimeout);
-                    this.tapTimeout = null;
-                }
-                this.client.sendMouseButton(2, true);
-                this.client.sendMouseButton(2, false);
-                this.lastTapTime = 0;
+        if (this.dragging) {
+            for (const touch of Array.from(e.changedTouches)) {
+                this.touches.delete(touch.identifier);
             }
+            if (this.touches.size === 0) {
+                this.dragging = false;
+                this.client.sendMouseButton(0, false);
+                this.fingerCount = 0;
+            }
+            return;
         }
 
-        // Remove ended touches
+        // Check movement before removing from map
+        const TAP_THRESHOLD_SQ = 100; // 10px radius, squared
         for (const touch of Array.from(e.changedTouches)) {
+            const state = this.touches.get(touch.identifier);
+            if (state) {
+                const dx = touch.clientX - state.startX;
+                const dy = touch.clientY - state.startY;
+                if (dx * dx + dy * dy > TAP_THRESHOLD_SQ) {
+                    this.fingerCount = 0; // movement cancels tap
+                }
+            }
             this.touches.delete(touch.identifier);
         }
-    }
 
-    destroy(): void {
-        if (this.tapTimeout) {
-            clearTimeout(this.tapTimeout);
+        // When all fingers are up, wait briefly for additional fingers
+        // before deciding the gesture type (two fingers rarely land/lift
+        // at exactly the same instant)
+        if (this.touches.size === 0 && this.fingerCount > 0) {
+            this.tapTimer = window.setTimeout(() => {
+                this.tapTimer = null;
+                if (this.fingerCount === 1) {
+                    this.client.sendMouseButton(0, true);
+                    this.client.sendMouseButton(0, false);
+                    this.lastTapTime = Date.now();
+                } else if (this.fingerCount >= 2) {
+                    this.client.sendMouseButton(2, true);
+                    this.client.sendMouseButton(2, false);
+                }
+                this.fingerCount = 0;
+            }, 50);
         }
     }
 }

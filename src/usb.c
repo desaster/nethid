@@ -41,9 +41,10 @@
 queue_t fifo_keyboard;
 queue_t fifo_consumer;
 queue_t fifo_system;
+queue_t fifo_mouse_btn;  // queued button state transitions
 
 // Mouse accumulator: movement deltas are summed and drained ±127 per HID report.
-// This avoids queue overflow during fast/high-sensitivity mouse movement.
+// Button state changes are queued separately so rapid press+release aren't merged.
 static struct {
     int32_t dx;
     int32_t dy;
@@ -55,7 +56,8 @@ static struct {
 
 static bool mouse_has_pending(void)
 {
-    return mouse_acc.dx != 0 || mouse_acc.dy != 0 ||
+    return !queue_is_empty(&fifo_mouse_btn) ||
+           mouse_acc.dx != 0 || mouse_acc.dy != 0 ||
            mouse_acc.vertical != 0 || mouse_acc.horizontal != 0 ||
            mouse_acc.buttons != mouse_acc.last_sent_buttons;
 }
@@ -76,6 +78,7 @@ void tud_mount_cb(void)
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
     queue_init(&fifo_consumer, sizeof(uint16_t), 32);
     queue_init(&fifo_system, sizeof(uint8_t), 32);
+    queue_init(&fifo_mouse_btn, sizeof(uint8_t), 8);
     memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = true;
     usb_suspended = false;
@@ -91,6 +94,7 @@ void tud_umount_cb(void)
     queue_free(&fifo_keyboard);
     queue_free(&fifo_consumer);
     queue_free(&fifo_system);
+    queue_free(&fifo_mouse_btn);
     memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = false;
     remote_wakeup_enabled = false;
@@ -183,6 +187,9 @@ void depress_key(uint16_t key)
 
 void move_mouse(uint8_t buttons, int16_t x, int16_t y, int16_t vertical, int16_t horizontal)
 {
+    if (buttons != mouse_acc.buttons) {
+        queue_try_add(&fifo_mouse_btn, &buttons);
+    }
     mouse_acc.buttons = buttons;
     mouse_acc.dx += x;
     mouse_acc.dy += y;
@@ -247,15 +254,21 @@ static void send_events(int report_id)
         int8_t cy = clamp8(mouse_acc.dy);
         int8_t cv = clamp8(mouse_acc.vertical);
         int8_t ch = clamp8(mouse_acc.horizontal);
+        // Pop queued button state if available, ensuring each button
+        // transition gets its own USB report
+        uint8_t buttons = mouse_acc.buttons;
+        if (!queue_is_empty(&fifo_mouse_btn)) {
+            queue_try_remove(&fifo_mouse_btn, &buttons);
+        }
         tud_hid_mouse_report(
                 REPORT_ID_MOUSE,
-                mouse_acc.buttons,
+                buttons,
                 cx, cy, cv, ch);
         mouse_acc.dx -= cx;
         mouse_acc.dy -= cy;
         mouse_acc.vertical -= cv;
         mouse_acc.horizontal -= ch;
-        mouse_acc.last_sent_buttons = mouse_acc.buttons;
+        mouse_acc.last_sent_buttons = buttons;
     } else if (report_id == REPORT_ID_CONSUMER_CONTROL && !queue_is_empty(&fifo_consumer)) {
         uint16_t code;
         if (queue_try_remove(&fifo_consumer, &code)) {
