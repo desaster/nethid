@@ -4,6 +4,30 @@ import type { ConnectionState, USBStatus } from "./hid";
 import { KeyboardManager } from "./keyboard";
 import { getDesktopLayouts, MOBILE_LAYOUTS, type LayoutPreset } from "./keyboard-layouts";
 
+// Hash-based routing
+function navigateTo(hash: string): void {
+    cleanupControl();
+    location.hash = hash;
+}
+
+window.addEventListener("hashchange", () => {
+    cleanupControl();
+    routeByHash();
+});
+
+function routeByHash(): void {
+    const hash = location.hash.replace('#', '');
+    if (!cachedStatus || cachedStatus.mode === "ap") {
+        init();
+    } else if (hash === "control") {
+        renderControlPage();
+    } else if (hash === "settings") {
+        renderSettingsPage();
+    } else {
+        renderStatusPage(cachedStatus);
+    }
+}
+
 // Layout preset storage
 const LAYOUT_PRESET_KEY = 'nethid-layout-preset';
 
@@ -255,11 +279,11 @@ function renderStatusPage(status: DeviceStatus): void {
     `;
 
     document.getElementById("control-btn")?.addEventListener("click", () => {
-        renderControlPage();
+        navigateTo("control");
     });
 
     document.getElementById("settings-btn")?.addEventListener("click", () => {
-        renderSettingsPage();
+        navigateTo("settings");
     });
 }
 
@@ -308,8 +332,7 @@ function renderControlPage(): void {
 
     // Setup back button
     document.getElementById("back-btn")?.addEventListener("click", () => {
-        cleanupControl();
-        init();
+        navigateTo("");
     });
 
     // Setup fullscreen button
@@ -535,7 +558,7 @@ async function renderSettingsPage(): Promise<void> {
                 <button id="back-btn" class="btn-secondary">Back</button>
             </div>
         `;
-        document.getElementById("back-btn")?.addEventListener("click", init);
+        document.getElementById("back-btn")?.addEventListener("click", () => navigateTo(""));
         return;
     }
 
@@ -655,7 +678,7 @@ async function renderSettingsPage(): Promise<void> {
     `;
 
     // Back button
-    document.getElementById("back-btn")?.addEventListener("click", init);
+    document.getElementById("back-btn")?.addEventListener("click", () => navigateTo(""));
 
     // Reboot button
     document.getElementById("reboot-btn")?.addEventListener("click", async () => {
@@ -926,7 +949,7 @@ function render(status: DeviceStatus | null): void {
     if (status.mode === "ap") {
         renderWifiConfigPage(status, cachedNetworks);
     } else {
-        renderStatusPage(status);
+        routeByHash();
     }
 }
 
