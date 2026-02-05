@@ -1,4 +1,4 @@
-import "./style.css";
+import "./style.scss";
 import { HIDClient, InputCapture, TouchTrackpad, getKeyDisplayName, isTouchDevice } from "./hid";
 import type { ConnectionState, USBStatus } from "./hid";
 import { KeyboardManager } from "./keyboard";
@@ -260,7 +260,6 @@ function renderStatusPage(status: DeviceStatus): void {
     app.innerHTML = `
         <div class="container">
             <h1>NetHID</h1>
-            <p class="status-ok">Online</p>
             <table>
                 <tr><th>Hostname</th><td>${escapeHtml(status.hostname)}</td></tr>
                 <tr><th>MAC</th><td>${status.mac}</td></tr>
@@ -294,16 +293,19 @@ function renderControlPage(): void {
     app.innerHTML = `
         <div class="control-page">
             <div class="control-header">
-                <button id="back-btn" class="btn-small">Back</button>
-                <span id="connection-status" class="connection-status">Disconnected</span>
+                <button id="back-btn" class="header-btn" title="Back to status">\u2190</button>
+                <div class="header-spacer"></div>
+                <div class="header-status">
+                    <span id="connection-dot" class="status-dot status-dot-disconnected"></span>
+                    <span id="connection-status" class="connection-status">Disconnected</span>
+                </div>
+                <div class="header-spacer"></div>
                 <div class="header-controls">
-                    <label for="sensitivity-select" class="sensitivity-label">Mouse speed</label>
                     <select id="sensitivity-select" class="sensitivity-select" title="Mouse speed">
                         ${MOUSE_SENSITIVITY_PRESETS.map(p =>
                             `<option value="${p.value}" ${p.value === getMouseSensitivity() ? 'selected' : ''}>${p.label}</option>`
                         ).join('')}
                     </select>
-                    <button id="fullscreen-btn" class="btn-small">Fullscreen</button>
                 </div>
             </div>
             <div id="capture-zone" class="capture-zone ${isTouch ? 'touch-mode' : ''}">
@@ -315,19 +317,6 @@ function renderControlPage(): void {
                 </div>
             </div>
             <div id="keyboard-section" class="keyboard-section"></div>
-            <div class="control-footer">
-                ${isTouch ? `
-                    <div class="touch-hints">
-                        <span>Drag: move</span>
-                        <span>Tap: click</span>
-                        <span>2-finger tap: right-click</span>
-                        <span>Tap+hold+drag: click &amp; drag</span>
-                    </div>
-                ` : `
-                    <div class="modifiers-display" id="modifiers-display"></div>
-                    <div class="control-hint">Press Escape to release</div>
-                `}
-            </div>
         </div>
     `;
 
@@ -336,27 +325,16 @@ function renderControlPage(): void {
         navigateTo("");
     });
 
-    // Setup fullscreen button
-    document.getElementById("fullscreen-btn")?.addEventListener("click", toggleFullscreen);
-
     // Setup HID client
     setupHIDControl(isTouch);
 }
 
-function toggleFullscreen(): void {
-    if (document.fullscreenElement) {
-        document.exitFullscreen();
-    } else {
-        document.documentElement.requestFullscreen();
-    }
-}
-
 function setupHIDControl(isTouch: boolean): void {
     const statusEl = document.getElementById("connection-status")!;
+    const dotEl = document.getElementById("connection-dot")!;
     const promptEl = document.getElementById("capture-prompt")!;
     const zoneEl = document.getElementById("capture-zone")!;
     const keysEl = document.getElementById("keys-display")!;
-    const modsEl = document.getElementById("modifiers-display");
 
     // Track current states for combined status display
     let currentConnState: ConnectionState = 'disconnected';
@@ -388,6 +366,17 @@ function setupHIDControl(isTouch: boolean): void {
 
         statusEl.textContent = text;
         statusEl.className = `connection-status ${cssClass}`;
+
+        // Update status dot
+        const dotClassMap: Record<string, string> = {
+            'connection-connected': 'status-dot-connected',
+            'connection-connecting': 'status-dot-connecting',
+            'connection-disconnected': 'status-dot-disconnected',
+            'connection-displaced': 'status-dot-displaced',
+            'connection-usb-suspended': 'status-dot-usb-suspended',
+            'connection-usb-disconnected': 'status-dot-usb-disconnected',
+        };
+        dotEl.className = `status-dot ${dotClassMap[cssClass] || 'status-dot-disconnected'}`;
 
         // Update prompt for touch mode
         if (isTouch && currentConnState === 'connected') {
@@ -424,34 +413,25 @@ function setupHIDControl(isTouch: boolean): void {
                     : "Click to capture keyboard & mouse";
             },
             onKeysChange: (keys: Set<string>, modifiers: Set<string>) => {
-                // Update keys display
-                keysEl.innerHTML = Array.from(keys)
-                    .map(k => `<span class="key-badge">${escapeHtml(getKeyDisplayName(k))}</span>`)
-                    .join("");
-
-                // Update modifiers display
-                if (modsEl) {
-                    const modNames = ['Ctrl', 'Shift', 'Alt', 'Meta'];
-                    const activeModNames: string[] = [];
-                    for (const mod of modifiers) {
-                        if (mod.startsWith('Control')) activeModNames.push('Ctrl');
-                        else if (mod.startsWith('Shift')) activeModNames.push('Shift');
-                        else if (mod.startsWith('Alt')) activeModNames.push('Alt');
-                        else if (mod.startsWith('Meta')) activeModNames.push('Meta');
-                    }
-                    modsEl.innerHTML = modNames
-                        .map(m => `<span class="mod-badge ${activeModNames.includes(m) ? 'active' : ''}">${m}</span>`)
-                        .join("");
+                // Build list of active modifiers
+                const activeModNames: string[] = [];
+                for (const mod of modifiers) {
+                    if (mod.startsWith('Control')) activeModNames.push('Ctrl');
+                    else if (mod.startsWith('Shift')) activeModNames.push('Shift');
+                    else if (mod.startsWith('Alt')) activeModNames.push('Alt');
+                    else if (mod.startsWith('Meta')) activeModNames.push('Meta');
                 }
+
+                // Show modifiers first, then regular keys
+                const modBadges = activeModNames
+                    .map(m => `<span class="key-badge key-badge-mod">${m}</span>`);
+                const keyBadges = Array.from(keys)
+                    .map(k => `<span class="key-badge">${escapeHtml(getKeyDisplayName(k))}</span>`);
+
+                keysEl.innerHTML = [...modBadges, ...keyBadges].join("");
             }
         });
 
-        // Initialize modifiers display
-        if (modsEl) {
-            modsEl.innerHTML = ['Ctrl', 'Shift', 'Alt', 'Meta']
-                .map(m => `<span class="mod-badge">${m}</span>`)
-                .join("");
-        }
     }
 
     // Setup mouse sensitivity control
@@ -544,7 +524,6 @@ async function renderSettingsPage(): Promise<void> {
     app.innerHTML = `
         <div class="container">
             <h1>NetHID</h1>
-            <p class="status-ok">Settings</p>
             <p>Loading settings...</p>
         </div>
     `;
@@ -564,8 +543,7 @@ async function renderSettingsPage(): Promise<void> {
 
     app.innerHTML = `
         <div class="container">
-            <h1>NetHID</h1>
-            <p class="status-ok">Settings</p>
+            <h1>NetHID Settings</h1>
 
             <form id="settings-form" class="settings-form">
                 <div class="form-group">
