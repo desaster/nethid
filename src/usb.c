@@ -42,6 +42,7 @@ queue_t fifo_keyboard;
 queue_t fifo_consumer;
 queue_t fifo_system;
 queue_t fifo_mouse_btn;  // queued button state transitions
+static bool queues_initialized = false;
 
 // Mouse accumulator: movement deltas are summed and drained ±127 per HID report.
 // Button state changes are queued separately so rapid press+release aren't merged.
@@ -74,11 +75,23 @@ uint8_t keycodes[6] = { 0, 0, 0, 0, 0, 0 };
 void tud_mount_cb(void)
 {
     printf("USB: Mount callback\r\n");
+
+    // Free old queues first to prevent memory leak if mount fires
+    // without a preceding unmount (e.g. during USB bus reset)
+    if (queues_initialized) {
+        queue_free(&fifo_keyboard);
+        queue_free(&fifo_consumer);
+        queue_free(&fifo_system);
+        queue_free(&fifo_mouse_btn);
+    }
+
     // initialize fifo queues for discrete HID reports
     queue_init(&fifo_keyboard, sizeof(uint8_t[6]), 32);
     queue_init(&fifo_consumer, sizeof(uint16_t), 32);
     queue_init(&fifo_system, sizeof(uint8_t), 32);
     queue_init(&fifo_mouse_btn, sizeof(uint8_t), 8);
+    queues_initialized = true;
+
     memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = true;
     usb_suspended = false;
@@ -95,6 +108,7 @@ void tud_umount_cb(void)
     queue_free(&fifo_consumer);
     queue_free(&fifo_system);
     queue_free(&fifo_mouse_btn);
+    queues_initialized = false;
     memset(&mouse_acc, 0, sizeof(mouse_acc));
     usb_mounted = false;
     remote_wakeup_enabled = false;
@@ -129,6 +143,8 @@ void tud_resume_cb(void)
 
 void press_key(uint16_t key)
 {
+    if (!usb_mounted) return;
+
     bool keys_changed = false;
 
     // check that key isn't already pressed
@@ -161,6 +177,8 @@ void press_key(uint16_t key)
 
 void depress_key(uint16_t key)
 {
+    if (!usb_mounted) return;
+
     bool keys_changed = false;
 
     // find the key and set it as released
@@ -187,6 +205,8 @@ void depress_key(uint16_t key)
 
 void move_mouse(uint8_t buttons, int16_t x, int16_t y, int16_t vertical, int16_t horizontal)
 {
+    if (!usb_mounted) return;
+
     if (buttons != mouse_acc.buttons) {
         queue_try_add(&fifo_mouse_btn, &buttons);
     }
@@ -199,6 +219,8 @@ void move_mouse(uint8_t buttons, int16_t x, int16_t y, int16_t vertical, int16_t
 
 void press_consumer(uint16_t code)
 {
+    if (!usb_mounted) return;
+
     if (!queue_try_add(&fifo_consumer, &code)) {
         printf("Consumer report queue full!\r\n");
     }
@@ -206,6 +228,8 @@ void press_consumer(uint16_t code)
 
 void release_consumer(void)
 {
+    if (!usb_mounted) return;
+
     uint16_t code = 0;
     if (!queue_try_add(&fifo_consumer, &code)) {
         printf("Consumer report queue full!\r\n");
@@ -214,6 +238,8 @@ void release_consumer(void)
 
 void press_system(uint16_t code)
 {
+    if (!usb_mounted) return;
+
     // Convert HID usage to report value (0x81->1, 0x82->2, 0x83->3)
     uint8_t report_val = (uint8_t)(code - 0x80);
     if (!queue_try_add(&fifo_system, &report_val)) {
@@ -223,6 +249,8 @@ void press_system(uint16_t code)
 
 void release_system(void)
 {
+    if (!usb_mounted) return;
+
     uint8_t report_val = 0;
     if (!queue_try_add(&fifo_system, &report_val)) {
         printf("System report queue full!\r\n");
@@ -300,6 +328,9 @@ void hid_task(void)
 
     start_ms += interval_ms;
 
+    // Don't access queues if USB is not mounted
+    if (!usb_mounted) return;
+
     // Check for remote wakeup BEFORE checking tud_hid_ready()
     // (tud_hid_ready() returns false when suspended, so we'd never reach wakeup logic)
     if (tud_suspended() &&
@@ -310,7 +341,14 @@ void hid_task(void)
         // Wake up host if we are in suspend mode
         // and REMOTE_WAKEUP feature is enabled by host
         if (remote_wakeup_enabled) {
-            printf("USB: Triggering remote wakeup\r\n");
+            printf("USB: Triggering remote wakeup (reason:");
+            if (!queue_is_empty(&fifo_keyboard)) printf(" keyboard");
+            if (mouse_has_pending()) printf(" mouse[dx=%d,dy=%d,v=%d,h=%d,btn=0x%02x]",
+                (int)mouse_acc.dx, (int)mouse_acc.dy, (int)mouse_acc.vertical,
+                (int)mouse_acc.horizontal, mouse_acc.buttons);
+            if (!queue_is_empty(&fifo_consumer)) printf(" consumer");
+            if (!queue_is_empty(&fifo_system)) printf(" system");
+            printf(")\r\n");
             tud_remote_wakeup();
         } else {
             printf("USB: Remote wakeup not enabled by host\r\n");

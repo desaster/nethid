@@ -26,6 +26,7 @@
 #include <pico/stdlib.h>
 #include <pico/stdio.h>
 #include <pico/cyw43_arch.h>
+#include <hardware/watchdog.h>
 
 #include "bsp/board.h"
 #include "tusb.h"
@@ -51,6 +52,7 @@
 #define UART_DEBUG_BAUD 115200
 
 static struct udp_pcb *pcb;
+static bool last_boot_was_watchdog = false;
 
 // Current WiFi credentials (loaded from flash at boot)
 static char current_wifi_ssid[WIFI_SSID_MAX_LEN + 1];
@@ -103,7 +105,14 @@ int main()
         UART_DEBUG_BAUD,
         UART_DEBUG_TX_PIN,
         UART_DEBUG_RX_PIN);
-    printf("\r\n------------------------------------------------------------------------------\r\nNetHID initializing\r\n------------------------------------------------------------------------------\r\n");
+    printf("\r\n------------------------------------------------------------------------------\r\n");
+    last_boot_was_watchdog = watchdog_caused_reboot();
+    if (last_boot_was_watchdog) {
+        printf("*** WATCHDOG RESET - device crashed! ***\r\n");
+    } else {
+        printf("Normal boot (power cycle or reset)\r\n");
+    }
+    printf("NetHID initializing\r\n------------------------------------------------------------------------------\r\n");
 
     printf("tusb_init()\r\n");
     tusb_init();
@@ -172,9 +181,15 @@ int main()
         }
     }
 
-    printf("Entering main loop\r\n");
+    // Enable watchdog with 8 second timeout (max is ~8.3s on RP2040)
+    // If device hangs, watchdog will reset it
+    watchdog_enable(8000, true);  // pause_on_debug=true
+    printf("Entering main loop (watchdog enabled)\r\n");
 
     while (true) {
+        // Reset watchdog timer - must be called regularly or device resets
+        watchdog_update();
+
         // usb device task
         tud_task();
 
@@ -339,6 +354,11 @@ int setup_server()
 
     // Initialize syslog (after network is up)
     syslog_init();
+
+    // Log crash reason now that syslog is available
+    if (last_boot_was_watchdog) {
+        printf("*** Previous boot was a watchdog crash ***\r\n");
+    }
 
     cyw43_arch_lwip_end();
 
