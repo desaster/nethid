@@ -2,9 +2,6 @@
 #
 # Build script for NetHID
 #
-# WiFi credentials are now stored in flash and configured via the web interface.
-# The device will start in AP mode if no credentials are configured.
-#
 # To build with docker, first build the docker image:
 #   docker build -t nethiddev:latest .
 #
@@ -25,14 +22,14 @@ export PICO_BOARD=pico_w
 VERSION=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "unknown")
 echo ":: Version: $VERSION"
 
-if [ ! "$USE_DOCKER" = "1" ] || [ -f /.dockerenv ]; then
+if [ ! "$USE_DOCKER" = "1" ] || [ -f /.dockerenv ] || [ -f /.containerenv ]; then
     # Build web assets if web/dist doesn't exist or SKIP_WEB is not set
     if [ "$SKIP_WEB" != "1" ] && [ -d "web" ]; then
         if [ -f "web/package.json" ]; then
             echo ":: Building web assets"
             # Generate version file for web
             echo "export const VERSION = \"$VERSION\";" > web/src/version.ts
-            (cd web && npm run build)
+            (cd web && npm ci && npm run build)
             echo ":: Generating fsdata.c"
             python3 scripts/makefsdata.py web/dist src/httpd/fsdata.c
         fi
@@ -46,5 +43,6 @@ if [ ! "$USE_DOCKER" = "1" ] || [ -f /.dockerenv ]; then
     make -C build
 else
     echo ":: Running docker container"
+    #podman run -it --rm --userns=keep-id -v $(pwd):/work nethiddev ./build.sh
     docker run -it --rm -v $(pwd):/work nethiddev ./build.sh
 fi

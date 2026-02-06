@@ -1,4 +1,4 @@
-FROM alpine:3.18.0
+FROM alpine:3.23.3
 
 # Install toolchain
 RUN apk update && \
@@ -13,23 +13,29 @@ RUN apk update && \
             bsd-compat-headers \
             newlib-arm-none-eabi \
             gcc-arm-none-eabi \
-            g++-arm-none-eabi
+            g++-arm-none-eabi \
+            linux-headers \
+            bash \
+            curl \
+            nodejs \
+            npm
 
+# pico sdk
 ARG SDK_PATH=/opt/pico_sdk
-RUN git clone --depth 1 --branch 1.5.1 https://github.com/raspberrypi/pico-sdk $SDK_PATH && \
+RUN git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/pico-sdk $SDK_PATH && \
     cd $SDK_PATH && \
     git submodule update --init
 
 ENV PICO_SDK_PATH=$SDK_PATH
 
-# Picotool installation
-RUN git clone --depth 1 --branch 1.1.1 https://github.com/raspberrypi/picotool.git /home/picotool && \
+# picotool
+RUN git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/picotool.git /home/picotool && \
     cd /home/picotool && \
     mkdir build && \
     cd build && \
     cmake .. && \
     make && \
-    cp /home/picotool/build/picotool /bin/picotool && \
+    make install && \
     rm -rf /home/picotool
 
 RUN adduser -D dev
