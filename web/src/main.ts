@@ -610,13 +610,11 @@ async function renderSettingsPage(): Promise<void> {
                     <p class="form-hint">Remote logging via UDP syslog. Requires reboot to apply.</p>
 
                     <div class="form-group">
-                        <label for="syslog-server">Server IP</label>
+                        <label for="syslog-server">Server</label>
                         <input type="text" id="syslog-server"
                                value="${escapeHtml(settings.syslog_server)}"
-                               maxlength="15"
-                               placeholder="Leave empty to disable"
-                               pattern="^$|^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$">
-                        <p class="form-hint">IPv4 address only (e.g., 192.168.1.100)</p>
+                               maxlength="63"
+                               placeholder="Leave empty to disable">
                     </div>
 
                     <div class="form-group">

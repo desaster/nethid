@@ -45,7 +45,7 @@
 #define MQTT_DEFAULT_PORT 1883
 
 // Syslog settings limits
-#define SYSLOG_SERVER_MAX_LEN 15  // IPv4 only: "xxx.xxx.xxx.xxx"
+#define SYSLOG_SERVER_MAX_LEN 63  // Hostname or IPv4 address
 #define SYSLOG_DEFAULT_PORT 514
 
 // Settings flags bitfield
@@ -172,12 +172,12 @@ bool settings_set_mqtt_client_id(const char *client_id);
 // Syslog Settings
 //--------------------------------------------------------------------+
 
-// Get syslog server IP (empty string if not configured)
+// Get syslog server hostname/IP (empty string if not configured)
 // server buffer must be at least SYSLOG_SERVER_MAX_LEN+1 bytes
 // Returns true if configured, false if not set
 bool settings_get_syslog_server(char *server);
 
-// Set syslog server IP (empty string to disable)
+// Set syslog server hostname/IP (empty string to disable)
 bool settings_set_syslog_server(const char *server);
 
 // Get syslog port (returns default 514 if not configured)

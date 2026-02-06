@@ -40,8 +40,8 @@
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic value to identify valid config (version 5 with syslog settings)
-#define CONFIG_MAGIC 0x4E455435  // "NET5" (version 5)
+// Magic values for config versioning
+#define CONFIG_MAGIC 0x4E455436  // "NET6"
 
 // Config structure stored in flash
 typedef struct {
@@ -53,7 +53,7 @@ typedef struct {
     char wifi_ssid[WIFI_SSID_MAX_LEN + 1];      // null-terminated
     char wifi_password[WIFI_PASSWORD_MAX_LEN + 1];  // null-terminated
     char hostname[HOSTNAME_MAX_LEN + 1];        // null-terminated
-    // MQTT settings (added in version 4)
+    // MQTT settings
     uint8_t mqtt_enabled;
     uint16_t mqtt_port;
     char mqtt_broker[MQTT_BROKER_MAX_LEN + 1];      // null-terminated
@@ -61,10 +61,10 @@ typedef struct {
     char mqtt_username[MQTT_USERNAME_MAX_LEN + 1];  // null-terminated
     char mqtt_password[MQTT_PASSWORD_MAX_LEN + 1];  // null-terminated
     char mqtt_client_id[MQTT_CLIENT_ID_MAX_LEN + 1]; // null-terminated
-    // Syslog settings (added in version 5)
-    char syslog_server[SYSLOG_SERVER_MAX_LEN + 1];  // null-terminated IPv4
+    // Syslog settings
+    char syslog_server[SYSLOG_SERVER_MAX_LEN + 1];  // null-terminated hostname or IPv4
     uint16_t syslog_port;
-    uint8_t reserved_settings[64];              // Future settings space
+    uint8_t reserved_settings[16];              // Future settings space
     uint32_t checksum;
 } flash_config_t;
 
