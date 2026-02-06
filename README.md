@@ -42,6 +42,8 @@ Once connected to your network, access the web interface at the device's IP addr
 
 ![Web interface](pics/nethid_web_example.png)
 
+![Mobile interface](pics/nethid_mobile_example.png)
+
 The web UI provides:
 - Virtual keyboard (TKL layout for desktop, compact layout for mobile)
 - Mouse control via trackpad area
