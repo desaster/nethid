@@ -122,14 +122,22 @@ int ap_mode_start(void)
 static enum {
     BOOTSEL_IDLE,
     BOOTSEL_PRESSED,
-    BOOTSEL_TRIGGERED
+    BOOTSEL_WAIT_RELEASE
 } bootsel_state = BOOTSEL_IDLE;
 
 static uint32_t bootsel_press_start = 0;
+static uint32_t bootsel_release_start = 0;
 static uint16_t saved_blink_state = 0;
+static uint8_t bootsel_release_count = 0;
 
 // Fast blink pattern for BOOTSEL feedback
 #define BLINK_BOOTSEL_HELD 0b1010101010101010
+
+// Debounce: require consecutive "released" reads before accepting release
+#define BOOTSEL_DEBOUNCE_COUNT 50
+
+// Max time to wait for button release before rebooting anyway
+#define BOOTSEL_RELEASE_TIMEOUT_MS 10000
 
 void bootsel_task(void)
 {
@@ -141,6 +149,7 @@ void bootsel_task(void)
             if (pressed) {
                 bootsel_state = BOOTSEL_PRESSED;
                 bootsel_press_start = now;
+                bootsel_release_count = 0;
                 saved_blink_state = blink_state;
                 printf("BOOTSEL pressed, hold for %d seconds to enter AP mode\r\n",
                        BOOTSEL_HOLD_TIME_MS / 1000);
@@ -149,40 +158,46 @@ void bootsel_task(void)
 
         case BOOTSEL_PRESSED:
             if (!pressed) {
-                // Released before timeout
-                bootsel_state = BOOTSEL_IDLE;
-                blink_state = saved_blink_state;
-                printf("BOOTSEL released\r\n");
-            } else if (now - bootsel_press_start >= BOOTSEL_HOLD_TIME_MS) {
-                // Held long enough
-                bootsel_state = BOOTSEL_TRIGGERED;
-                printf("BOOTSEL held for %d seconds, setting AP mode flag and rebooting...\r\n",
-                       BOOTSEL_HOLD_TIME_MS / 1000);
-
-                // Set the force AP flag
-                settings_set_force_ap();
-
-                // Give visual feedback
-                cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-                sleep_ms(200);
-                cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-                sleep_ms(200);
-                cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-                sleep_ms(200);
-
-                // Reboot using watchdog
-                watchdog_reboot(0, 0, 0);
-                while (1) {
-                    tight_loop_contents();
+                bootsel_release_count++;
+                if (bootsel_release_count >= BOOTSEL_DEBOUNCE_COUNT) {
+                    // Genuinely released before hold time reached
+                    bootsel_state = BOOTSEL_IDLE;
+                    blink_state = saved_blink_state;
+                    bootsel_release_count = 0;
+                    printf("BOOTSEL released\r\n");
                 }
             } else {
-                // Still holding - fast blink feedback
-                blink_state = BLINK_BOOTSEL_HELD;
+                // Still pressed - reset release debounce counter
+                bootsel_release_count = 0;
+                if (now - bootsel_press_start >= BOOTSEL_HOLD_TIME_MS) {
+                    // Held long enough - set flag, wait for release before rebooting
+                    printf("BOOTSEL held for %d seconds, setting AP mode flag...\r\n",
+                           BOOTSEL_HOLD_TIME_MS / 1000);
+                    settings_set_force_ap();
+
+                    bootsel_state = BOOTSEL_WAIT_RELEASE;
+                    bootsel_release_start = now;
+                    blink_state = 0xFFFF;  // Solid LED = "release the button"
+                    printf("Release BOOTSEL to reboot into AP mode\r\n");
+                } else {
+                    // Still holding - fast blink feedback
+                    blink_state = BLINK_BOOTSEL_HELD;
+                }
             }
             break;
 
-        case BOOTSEL_TRIGGERED:
-            // Should never get here, we reboot
+        case BOOTSEL_WAIT_RELEASE:
+            if (!pressed) {
+                // Button released - safe to reboot (BOOTROM won't see BOOTSEL held)
+                printf("BOOTSEL released, rebooting to AP mode...\r\n");
+                watchdog_reboot(0, 0, 0);
+                while (1) { tight_loop_contents(); }
+            } else if (now - bootsel_release_start >= BOOTSEL_RELEASE_TIMEOUT_MS) {
+                // Timeout - reboot anyway (flag is saved, user can re-flash to recover)
+                printf("BOOTSEL release timeout, rebooting anyway\r\n");
+                watchdog_reboot(0, 0, 0);
+                while (1) { tight_loop_contents(); }
+            }
             break;
     }
 }

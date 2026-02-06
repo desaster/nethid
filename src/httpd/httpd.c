@@ -189,7 +189,7 @@ static int handle_api_reboot_ap_result(struct fs_file *file)
     cJSON_AddStringToObject(json, "status", "rebooting to AP mode");
     api_cjson_response(file, json);
     settings_set_force_ap();
-    watchdog_reboot(0, 0, 0);
+    request_reboot();
     return 1;
 }
 
@@ -199,7 +199,7 @@ static int handle_api_reboot_result(struct fs_file *file)
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "status", "rebooting");
     api_cjson_response(file, json);
-    watchdog_reboot(0, 0, 0);
+    request_reboot();
     return 1;
 }
 
@@ -233,7 +233,7 @@ static int handle_api_config_post_result(struct fs_file *file)
     api_cjson_response(file, json);
 
     if (post_config_success) {
-        watchdog_reboot(0, 0, 0);
+        request_reboot();
     }
     return 1;
 }

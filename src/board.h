@@ -65,4 +65,7 @@ extern bool in_ap_mode;
 
 void update_blink_state(void);
 
+// Request a deferred reboot (safe to call from lwIP callbacks)
+void request_reboot(void);
+
 #endif

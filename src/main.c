@@ -54,6 +54,11 @@
 static struct udp_pcb *pcb;
 static bool last_boot_was_watchdog = false;
 
+// Deferred reboot support - allows lwIP to finish sending responses before reset
+static bool reboot_requested = false;
+static uint32_t reboot_request_time = 0;
+#define REBOOT_DELAY_MS 500
+
 // Current WiFi credentials (loaded from flash at boot)
 static char current_wifi_ssid[WIFI_SSID_MAX_LEN + 1];
 static char current_wifi_password[WIFI_PASSWORD_MAX_LEN + 1];
@@ -195,6 +200,13 @@ int main()
 
         // need to call periodically when using pico_cyw43_arch_lwip_poll
         cyw43_arch_poll();
+
+        // Handle deferred reboot (gives lwIP time to send responses)
+        if (reboot_requested && (board_millis() - reboot_request_time >= REBOOT_DELAY_MS)) {
+            printf("Deferred reboot executing\r\n");
+            watchdog_reboot(0, 0, 0);
+            while (1) { tight_loop_contents(); }
+        }
 
         // check wifi status (only in STA mode)
         if (!in_ap_mode) {
@@ -386,6 +398,15 @@ int setup_ap_mode_server()
     cyw43_arch_lwip_end();
 
     return 0;
+}
+
+void request_reboot(void)
+{
+    if (!reboot_requested) {
+        reboot_requested = true;
+        reboot_request_time = board_millis();
+        printf("Reboot requested, will reboot in %d ms\r\n", REBOOT_DELAY_MS);
+    }
 }
 
 // poll for wifi status
