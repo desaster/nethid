@@ -333,6 +333,7 @@ button {
 // Control Page
 
 .control-page {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -496,6 +497,16 @@ button {
   overflow-x: auto;
   touch-action: manipulation;
   -webkit-touch-callout: none;
+}
+
+.keyboard-toggle {
+  margin-left: auto;
+}
+
+.keyboard-expand {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
 }
 
 .layout-select {

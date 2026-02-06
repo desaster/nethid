@@ -404,6 +404,10 @@ export interface KeyboardManagerOptions {
     unitSize?: number;
     gap?: number;
     isTouch?: boolean;
+    onToggle?: () => void;
+    presets?: { value: string; label: string }[];
+    currentPreset?: string;
+    onPresetChange?: (preset: string) => void;
 }
 
 export class KeyboardManager {
@@ -413,13 +417,19 @@ export class KeyboardManager {
     private unitSize: number;
     private gap: number;
     private isTouch: boolean;
+    private onToggle?: () => void;
+    private presets?: { value: string; label: string }[];
+    private currentPreset?: string;
+    private onPresetChange?: (preset: string) => void;
 
     private managerEl: HTMLElement | null = null;
     private tabsEl: HTMLElement | null = null;
     private keyboardContainer: HTMLElement | null = null;
     private keyboard: VirtualKeyboard | null = null;
     private currentLayoutId: string;
-    private maxHeight: number = 0;
+    private maxWidthUnits: number = 0;
+    private maxHeightUnits: number = 0;
+    private effectiveUnitSize: number = 0;
 
     constructor(options: KeyboardManagerOptions) {
         this.container = options.container;
@@ -428,23 +438,25 @@ export class KeyboardManager {
         this.unitSize = options.unitSize ?? 48;
         this.gap = options.gap ?? 4;
         this.isTouch = options.isTouch ?? false;
+        this.onToggle = options.onToggle;
+        this.presets = options.presets;
+        this.currentPreset = options.currentPreset;
+        this.onPresetChange = options.onPresetChange;
 
         // Default to first layout
         this.currentLayoutId = options.initialLayoutId || options.layouts[0]?.id || '';
 
-        // Calculate max height across all layouts
-        this.calculateMaxHeight();
+        // Calculate max dimensions (in units) across all layouts
+        this.calculateMaxDimensions();
 
         this.render();
     }
 
-    private calculateMaxHeight(): void {
+    private calculateMaxDimensions(): void {
         for (const layout of this.layouts) {
             const parsed = parseKLE(layout.kle);
-            const height = parsed.height * this.unitSize + (parsed.height - 1) * this.gap;
-            if (height > this.maxHeight) {
-                this.maxHeight = height;
-            }
+            this.maxWidthUnits = Math.max(this.maxWidthUnits, parsed.width);
+            this.maxHeightUnits = Math.max(this.maxHeightUnits, parsed.height);
         }
     }
 
@@ -453,41 +465,84 @@ export class KeyboardManager {
         this.managerEl = document.createElement('div');
         this.managerEl.className = 'keyboard-manager';
 
-        // Create tabs (only if more than one layout)
-        if (this.layouts.length > 1) {
+        // Create tabs (if more than one layout, or if extras need a home)
+        if (this.layouts.length > 1 || this.onToggle || this.presets) {
             this.tabsEl = document.createElement('div');
             this.tabsEl.className = 'km-tabs';
 
-            for (const layout of this.layouts) {
-                const tab = document.createElement('button');
-                tab.className = 'km-tab';
-                tab.textContent = layout.name;
-                tab.dataset.layoutId = layout.id;
+            if (this.layouts.length > 1) {
+                for (const layout of this.layouts) {
+                    const tab = document.createElement('button');
+                    tab.className = 'km-tab';
+                    tab.textContent = layout.name;
+                    tab.dataset.layoutId = layout.id;
 
-                if (layout.id === this.currentLayoutId) {
-                    tab.classList.add('km-tab-active');
+                    if (layout.id === this.currentLayoutId) {
+                        tab.classList.add('km-tab-active');
+                    }
+
+                    tab.addEventListener('click', () => {
+                        this.switchLayout(layout.id);
+                    });
+
+                    this.tabsEl.appendChild(tab);
                 }
+            }
 
-                tab.addEventListener('click', () => {
-                    this.switchLayout(layout.id);
-                });
+            if (this.presets && this.onPresetChange) {
+                const select = document.createElement('select');
+                select.className = 'layout-select';
+                for (const p of this.presets) {
+                    const opt = document.createElement('option');
+                    opt.value = p.value;
+                    opt.textContent = p.label;
+                    select.appendChild(opt);
+                }
+                if (this.currentPreset) {
+                    select.value = this.currentPreset;
+                }
+                const onChange = this.onPresetChange;
+                select.addEventListener('change', () => onChange(select.value));
+                this.tabsEl.appendChild(select);
+            }
 
-                this.tabsEl.appendChild(tab);
+            if (this.onToggle) {
+                const toggleBtn = document.createElement('button');
+                toggleBtn.className = 'km-tab keyboard-toggle';
+                toggleBtn.textContent = '\u2328\uFE0E';
+                toggleBtn.addEventListener('click', () => this.onToggle!());
+                this.tabsEl.appendChild(toggleBtn);
             }
 
             this.managerEl.appendChild(this.tabsEl);
         }
 
-        // Create keyboard container with fixed min-height
+        // Create keyboard container
         this.keyboardContainer = document.createElement('div');
         this.keyboardContainer.className = 'km-keyboard-container';
-        this.keyboardContainer.style.minHeight = `${this.maxHeight}px`;
         this.managerEl.appendChild(this.keyboardContainer);
+
+        // Append to DOM before measuring so clientWidth is available
+        this.container.appendChild(this.managerEl);
+
+        // Calculate effective unitSize: cap at configured value, shrink to fit container
+        const availableWidth = this.keyboardContainer.clientWidth;
+        if (availableWidth > 0 && this.maxWidthUnits > 0) {
+            this.effectiveUnitSize = Math.min(
+                this.unitSize,
+                Math.floor((availableWidth - (this.maxWidthUnits - 1) * this.gap) / this.maxWidthUnits)
+            );
+        } else {
+            this.effectiveUnitSize = this.unitSize;
+        }
+
+        // Set min-height based on effective unitSize
+        const minHeight = this.maxHeightUnits * this.effectiveUnitSize +
+                         (this.maxHeightUnits - 1) * this.gap;
+        this.keyboardContainer.style.minHeight = `${minHeight}px`;
 
         // Render initial keyboard
         this.renderKeyboard();
-
-        this.container.appendChild(this.managerEl);
     }
 
     private renderKeyboard(): void {
@@ -504,7 +559,7 @@ export class KeyboardManager {
             container: this.keyboardContainer,
             layout,
             client: this.client,
-            unitSize: this.unitSize,
+            unitSize: this.effectiveUnitSize,
             gap: this.gap,
             isTouch: this.isTouch,
             onLayerChange: (layerId) => {
@@ -537,6 +592,31 @@ export class KeyboardManager {
 
         // Render new keyboard
         this.renderKeyboard();
+    }
+
+    replaceLayouts(layouts: KeyboardLayout[], currentPreset?: string): void {
+        this.layouts = layouts;
+        this.currentLayoutId = layouts[0]?.id || '';
+        if (currentPreset !== undefined) {
+            this.currentPreset = currentPreset;
+        }
+        this.maxWidthUnits = 0;
+        this.maxHeightUnits = 0;
+        this.calculateMaxDimensions();
+
+        // Tear down current DOM
+        if (this.keyboard) {
+            this.keyboard.destroy();
+            this.keyboard = null;
+        }
+        if (this.managerEl) {
+            this.managerEl.remove();
+            this.managerEl = null;
+        }
+        this.tabsEl = null;
+        this.keyboardContainer = null;
+
+        this.render();
     }
 
     destroy(): void {

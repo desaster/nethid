@@ -316,6 +316,7 @@ function renderControlPage(): void {
                     <div class="keys-display" id="keys-display"></div>
                 </div>
             </div>
+            ${isTouch ? '<button id="keyboard-expand" class="km-tab keyboard-expand" hidden>\u2328\uFE0E</button>' : ''}
             <div id="keyboard-section" class="keyboard-section"></div>
         </div>
     `;
@@ -329,18 +330,14 @@ function renderControlPage(): void {
     setupHIDControl(isTouch);
 }
 
-function setupHIDControl(isTouch: boolean): void {
+function setupConnectionStatus(isTouch: boolean): HIDClient {
     const statusEl = document.getElementById("connection-status")!;
     const dotEl = document.getElementById("connection-dot")!;
     const promptEl = document.getElementById("capture-prompt")!;
-    const zoneEl = document.getElementById("capture-zone")!;
-    const keysEl = document.getElementById("keys-display")!;
 
-    // Track current states for combined status display
     let currentConnState: ConnectionState = 'disconnected';
     let currentUSBStatus: USBStatus = { mounted: false, suspended: false };
 
-    // Update status display based on connection and USB state
     function updateStatusDisplay(): void {
         let text: string;
         let cssClass: string;
@@ -367,7 +364,6 @@ function setupHIDControl(isTouch: boolean): void {
         statusEl.textContent = text;
         statusEl.className = `connection-status ${cssClass}`;
 
-        // Update status dot
         const dotClassMap: Record<string, string> = {
             'connection-connected': 'status-dot-connected',
             'connection-connecting': 'status-dot-connecting',
@@ -378,14 +374,12 @@ function setupHIDControl(isTouch: boolean): void {
         };
         dotEl.className = `status-dot ${dotClassMap[cssClass] || 'status-dot-disconnected'}`;
 
-        // Update prompt for touch mode
         if (isTouch && currentConnState === 'connected') {
             promptEl.textContent = 'Touch trackpad ready';
         }
     }
 
-    // Create HID client
-    hidClient = new HIDClient({
+    return new HIDClient({
         onStateChange: (state: ConnectionState) => {
             currentConnState = state;
             updateStatusDisplay();
@@ -398,14 +392,18 @@ function setupHIDControl(isTouch: boolean): void {
             console.error("HID error:", error);
         }
     });
+}
+
+function setupInputMode(isTouch: boolean): void {
+    const zoneEl = document.getElementById("capture-zone")!;
+    const promptEl = document.getElementById("capture-prompt")!;
 
     if (isTouch) {
-        // Touch mode: use TouchTrackpad
-        touchTrackpad = new TouchTrackpad(zoneEl, hidClient);
+        touchTrackpad = new TouchTrackpad(zoneEl, hidClient!);
         zoneEl.classList.add("touch-active");
     } else {
-        // Desktop mode: use InputCapture with pointer lock
-        inputCapture = new InputCapture(zoneEl, hidClient, {
+        const keysEl = document.getElementById("keys-display")!;
+        inputCapture = new InputCapture(zoneEl, hidClient!, {
             onCaptureChange: (captured: boolean) => {
                 zoneEl.classList.toggle("captured", captured);
                 promptEl.textContent = captured
@@ -413,7 +411,6 @@ function setupHIDControl(isTouch: boolean): void {
                     : "Click to capture keyboard & mouse";
             },
             onKeysChange: (keys: Set<string>, modifiers: Set<string>) => {
-                // Build list of active modifiers
                 const activeModNames: string[] = [];
                 for (const mod of modifiers) {
                     if (mod.startsWith('Control')) activeModNames.push('Ctrl');
@@ -422,7 +419,6 @@ function setupHIDControl(isTouch: boolean): void {
                     else if (mod.startsWith('Meta')) activeModNames.push('Meta');
                 }
 
-                // Show modifiers first, then regular keys
                 const modBadges = activeModNames
                     .map(m => `<span class="key-badge key-badge-mod">${m}</span>`);
                 const keyBadges = Array.from(keys)
@@ -431,80 +427,69 @@ function setupHIDControl(isTouch: boolean): void {
                 keysEl.innerHTML = [...modBadges, ...keyBadges].join("");
             }
         });
-
     }
+}
 
-    // Setup mouse sensitivity control
+function setupSensitivity(): void {
     const sensitivitySelect = document.getElementById('sensitivity-select') as HTMLSelectElement;
     const currentSensitivity = getMouseSensitivity();
 
-    if (inputCapture) {
-        inputCapture.setSensitivity(currentSensitivity);
-    }
-    if (touchTrackpad) {
-        touchTrackpad.setSensitivity(1.5 * currentSensitivity);
-    }
+    inputCapture?.setSensitivity(currentSensitivity);
+    touchTrackpad?.setSensitivity(1.5 * currentSensitivity);
 
     sensitivitySelect?.addEventListener('change', () => {
         const newValue = parseFloat(sensitivitySelect.value);
         setMouseSensitivity(newValue);
-        if (inputCapture) {
-            inputCapture.setSensitivity(newValue);
-        }
-        if (touchTrackpad) {
-            touchTrackpad.setSensitivity(1.5 * newValue);
-        }
+        inputCapture?.setSensitivity(newValue);
+        touchTrackpad?.setSensitivity(1.5 * newValue);
     });
+}
 
-    // Setup virtual keyboard
+function setupKeyboard(isTouch: boolean): void {
     const keyboardSection = document.getElementById("keyboard-section")!;
+    const expandBtn = document.getElementById('keyboard-expand');
     const currentPreset = getLayoutPreset();
     const layouts = isTouch ? MOBILE_LAYOUTS : getDesktopLayouts(currentPreset);
 
     keyboardManager = new KeyboardManager({
         container: keyboardSection,
-        client: hidClient,
+        client: hidClient!,
         layouts,
         unitSize: isTouch ? 36 : 48,
         gap: isTouch ? 3 : 4,
         isTouch,
+        onToggle: expandBtn ? () => {
+            keyboardSection.hidden = true;
+            expandBtn.hidden = false;
+        } : undefined,
+        ...(!isTouch ? {
+            presets: [
+                { value: 'ansi', label: 'ANSI (US)' },
+                { value: 'iso', label: 'ISO (UK)' },
+            ],
+            currentPreset,
+            onPresetChange: (value: string) => {
+                setLayoutPreset(value as LayoutPreset);
+                keyboardManager!.replaceLayouts(
+                    getDesktopLayouts(value as LayoutPreset), value
+                );
+            },
+        } : {}),
     });
 
-    // Add preset selector to tabs row (desktop only)
-    if (!isTouch) {
-        const tabsEl = keyboardSection.querySelector('.km-tabs');
-        if (tabsEl) {
-            const select = document.createElement('select');
-            select.className = 'layout-select';
-            select.innerHTML = `
-                <option value="ansi">ANSI (US)</option>
-                <option value="iso">ISO (UK)</option>
-            `;
-            select.value = currentPreset;
-            select.addEventListener('change', () => {
-                const newPreset = select.value as LayoutPreset;
-                setLayoutPreset(newPreset);
-                // Recreate keyboard with new layout
-                keyboardManager?.destroy();
-                keyboardManager = new KeyboardManager({
-                    container: keyboardSection,
-                    client: hidClient!,
-                    layouts: getDesktopLayouts(newPreset),
-                    unitSize: 48,
-                    gap: 4,
-                    isTouch: false,
-                });
-                // Re-add selector to new tabs
-                const newTabsEl = keyboardSection.querySelector('.km-tabs');
-                if (newTabsEl && !newTabsEl.contains(select)) {
-                    newTabsEl.appendChild(select);
-                }
-            });
-            tabsEl.appendChild(select);
-        }
+    if (expandBtn) {
+        expandBtn.addEventListener('click', () => {
+            keyboardSection.hidden = false;
+            expandBtn.hidden = true;
+        });
     }
+}
 
-    // Connect
+function setupHIDControl(isTouch: boolean): void {
+    hidClient = setupConnectionStatus(isTouch);
+    setupInputMode(isTouch);
+    setupSensitivity();
+    setupKeyboard(isTouch);
     hidClient.connect();
 }
 
