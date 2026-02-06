@@ -499,12 +499,17 @@ export class TouchTrackpad {
     private element: HTMLElement;
     private client: HIDClient;
 
+    // Pixels of centroid movement per scroll unit
+    private static readonly SCROLL_DIVISOR = 10;
+
     private touches: Map<number, { x: number; y: number; startX: number; startY: number }> = new Map();
     private fingerCount = 0;
     private tapTimer: number | null = null;
     private lastTapTime = 0;
     private dragging = false;
     private sensitivity = 1.5;
+    private scrollAccY = 0;
+    private scrollCentroidY: number | null = null;
 
     constructor(element: HTMLElement, client: HIDClient) {
         this.element = element;
@@ -549,6 +554,8 @@ export class TouchTrackpad {
                 startY: touch.clientY,
             });
         }
+        // Finger count changed — centroid is no longer valid
+        this.scrollCentroidY = null;
         if (!this.dragging) {
             this.fingerCount += e.changedTouches.length;
         }
@@ -591,21 +598,34 @@ export class TouchTrackpad {
                 state.y = touch.clientY;
             }
         } else if (touchCount === 2) {
-            // Two fingers: scroll
-            let totalDy = 0;
+            // Two fingers: scroll using centroid tracking
+            // Update positions from this event
             for (const touch of Array.from(e.changedTouches)) {
                 const state = this.touches.get(touch.identifier);
                 if (state) {
-                    totalDy += touch.clientY - state.y;
                     state.x = touch.clientX;
                     state.y = touch.clientY;
                 }
             }
 
-            const scrollY = Math.round(-totalDy / 20);
-            if (scrollY !== 0) {
-                this.client.sendScroll(0, scrollY);
+            // Compute centroid of all tracked touches
+            let centroidY = 0;
+            for (const state of this.touches.values()) {
+                centroidY += state.y;
             }
+            centroidY /= this.touches.size;
+
+            if (this.scrollCentroidY !== null) {
+                const dy = centroidY - this.scrollCentroidY;
+                // Accumulate fractional scroll; send integer part, keep remainder
+                this.scrollAccY += -dy / TouchTrackpad.SCROLL_DIVISOR;
+                const scrollY = Math.trunc(this.scrollAccY);
+                if (scrollY !== 0) {
+                    this.client.sendScroll(0, scrollY);
+                    this.scrollAccY -= scrollY;
+                }
+            }
+            this.scrollCentroidY = centroidY;
         }
     }
 
@@ -638,9 +658,13 @@ export class TouchTrackpad {
             this.touches.delete(touch.identifier);
         }
 
-        // When all fingers are up, wait briefly for additional fingers
-        // before deciding the gesture type (two fingers rarely land/lift
-        // at exactly the same instant)
+        if (this.touches.size === 0) {
+            this.scrollAccY = 0;
+            this.scrollCentroidY = null;
+        }
+
+        // When all fingers are up, wait briefly for additional fingers before
+        // deciding the gesture type (two fingers rarely land/lift simultaneously)
         if (this.touches.size === 0 && this.fingerCount > 0) {
             this.tapTimer = window.setTimeout(() => {
                 this.tapTimer = null;
