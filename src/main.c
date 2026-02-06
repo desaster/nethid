@@ -335,29 +335,37 @@ static void udp_receive(
 
 int setup_server()
 {
+    static bool initialized = false;
+
     cyw43_arch_lwip_begin();
 
     printf("IP address: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_list)));
 
-    pcb = udp_new();
-    udp_bind(pcb, IP_ADDR_ANY, 4444);
-    udp_recv(pcb, udp_receive, 0);
+    if (!initialized) {
+        initialized = true;
 
-    // Start HTTP server
-    nethid_httpd_init();
+        pcb = udp_new();
+        udp_bind(pcb, IP_ADDR_ANY, 4444);
+        udp_recv(pcb, udp_receive, 0);
 
-    // Start WebSocket server for HID control
-    websocket_init();
+        // Start HTTP server
+        nethid_httpd_init();
 
-    // Initialize MQTT client (will connect when enabled in settings)
-    mqtt_init();
+        // Start WebSocket server for HID control
+        websocket_init();
 
-    // Initialize syslog (after network is up)
-    syslog_init();
+        // Initialize MQTT client (will connect when enabled in settings)
+        mqtt_init();
 
-    // Log crash reason now that syslog is available
-    if (last_boot_was_watchdog) {
-        printf("*** Previous boot was a watchdog crash ***\r\n");
+        // Initialize syslog (after network is up)
+        syslog_init();
+
+        // Log crash reason now that syslog is available
+        if (last_boot_was_watchdog) {
+            printf("*** Previous boot was a watchdog crash ***\r\n");
+        }
+    } else {
+        printf("Wifi reconnected, servers already running\r\n");
     }
 
     cyw43_arch_lwip_end();
