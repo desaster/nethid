@@ -297,14 +297,9 @@ static void udp_receive(
             return;
         }
         kbd = (packet_keyboard *) (p->payload + sizeof(packet_header));
-        printf("Received scancode: %02x %02x\r\n",
-                kbd->pressed,
-                kbd->key);
         if (kbd->pressed) {
-            // printf("pressing key\r\n");
             press_key(kbd->key);
         } else {
-            // printf("depressing key\r\n");
             depress_key(kbd->key);
         }
     } else if (hdr->type == PACKET_TYPE_MOUSE) {
@@ -314,12 +309,6 @@ static void udp_receive(
             return;
         }
         mou = (packet_mouse *) (p->payload + sizeof(packet_header));
-        // printf("Received mouse packet: %02x %02x %02x %02x %02x\r\n",
-        //         mou->buttons,
-        //         mou->x,
-        //         mou->y,
-        //         mou->vertical,
-        //         mou->horizontal);
         move_mouse(mou->buttons, mou->x, mou->y, mou->vertical, mou->horizontal);
     } else if (hdr->type == PACKET_TYPE_CONSUMER) {
         if (p->len != sizeof(packet_header) + sizeof(packet_consumer)) {
@@ -328,9 +317,6 @@ static void udp_receive(
             return;
         }
         con = (packet_consumer *) (p->payload + sizeof(packet_header));
-        printf("Received consumer code: %04x %s\r\n",
-                con->code,
-                con->pressed ? "down" : "up");
         if (con->pressed) {
             press_consumer(con->code);
         } else {
