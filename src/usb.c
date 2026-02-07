@@ -36,7 +36,7 @@
 
 #include "board.h"
 #include "config.h"
-#include "websocket/websocket.h"
+#include "httpd/httpd_server.h"
 
 queue_t fifo_keyboard;
 queue_t fifo_consumer;

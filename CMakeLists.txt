@@ -31,8 +31,9 @@ add_executable(${TARGET}
     src/usb.c
     src/usb_descriptors.c
     src/hid_keys.c
-    src/httpd/httpd.c
-    src/websocket/websocket.c
+    src/httpd/httpd_server.c
+    src/httpd/httpd_handlers.c
+    src/httpd/httpd_websocket.c
     src/mqtt/mqtt.c
     src/settings.c
     src/syslog.c
@@ -44,7 +45,6 @@ add_executable(${TARGET}
 
 target_link_libraries(${TARGET}
     pico_cyw43_arch_lwip_poll
-    pico_lwip_http
     pico_lwip_mqtt
     pico_stdlib
     pico_multicore

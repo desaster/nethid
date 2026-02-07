@@ -133,8 +133,8 @@ export class HIDClient {
         this.intentionalDisconnect = false;
         this.setState('connecting');
 
-        // WebSocket on port 8081
-        const wsUrl = `ws://${location.hostname}:8081/`;
+        // WebSocket upgrade on the same HTTP port
+        const wsUrl = `ws://${location.hostname}/ws`;
         this.ws = new WebSocket(wsUrl);
         this.ws.binaryType = 'arraybuffer';
 

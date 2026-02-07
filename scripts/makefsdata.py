@@ -47,6 +47,7 @@ def generate_http_header(path, content_length, mime_type):
     header = f"HTTP/1.1 200 OK\r\n"
     header += f"Content-Length: {content_length}\r\n"
     header += f"Content-Type: {mime_type}\r\n"
+    header += f"Connection: close\r\n"
     header += f"\r\n"
     return header.encode('ascii')
 
@@ -129,7 +130,7 @@ def generate_fsdata(files):
         c_name = f['c_name']
         file_var = f'file_{c_name}'
 
-        output.append(f'const struct fsdata_file {file_var}[] = {{ {{')
+        output.append(f'static const struct fsdata_file {file_var}[] = {{ {{')
         output.append(f'    {prev_file},')
         output.append(f'    {c_name},')
         output.append(f'    {c_name} + {f["header_offset"]},')

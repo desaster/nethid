@@ -35,8 +35,7 @@
 #include "board.h"
 #include "usb.h"
 #include "config.h"
-#include "httpd/httpd.h"
-#include "websocket/websocket.h"
+#include "httpd/httpd_server.h"
 #include "mqtt/mqtt.h"
 #include "settings.h"
 #include "syslog.h"
@@ -346,11 +345,8 @@ int setup_server()
         udp_bind(pcb, IP_ADDR_ANY, 4444);
         udp_recv(pcb, udp_receive, 0);
 
-        // Start HTTP server
-        nethid_httpd_init();
-
-        // Start WebSocket server for HID control
-        websocket_init();
+        // Start HTTP server (includes WebSocket upgrade support)
+        httpd_server_init(80);
 
         // Initialize MQTT client (will connect when enabled in settings)
         mqtt_init();
@@ -379,7 +375,7 @@ int setup_ap_mode_server()
     printf("IP address: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_list)));
 
     // Start HTTP server only (no UDP or WebSocket in AP mode - it's for config only)
-    nethid_httpd_init();
+    httpd_server_init(80);
 
     cyw43_arch_lwip_end();
 
