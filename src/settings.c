@@ -40,8 +40,7 @@
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define FLASH_CONFIG_ADDR (XIP_BASE + FLASH_CONFIG_OFFSET)
 
-// Magic values for config versioning
-#define CONFIG_MAGIC 0x4E455436  // "NET6"
+#define CONFIG_MAGIC 0x4E455437  // "NET7"
 
 // Config structure stored in flash
 typedef struct {
@@ -64,9 +63,12 @@ typedef struct {
     // Syslog settings
     char syslog_server[SYSLOG_SERVER_MAX_LEN + 1];  // null-terminated hostname or IPv4
     uint16_t syslog_port;
-    uint8_t reserved_settings[16];              // Future settings space
+    // Device password
+    char device_password[DEVICE_PASSWORD_MAX_LEN + 1];
+    uint8_t reserved_settings[16];
     uint32_t checksum;
 } flash_config_t;
+
 
 // Calculate simple checksum over config data (excluding checksum field itself)
 static uint32_t calc_checksum(const flash_config_t *cfg)
@@ -91,12 +93,7 @@ static bool read_config(flash_config_t *cfg)
     }
 
     memcpy(cfg, flash_cfg, sizeof(flash_config_t));
-
-    if (cfg->checksum != calc_checksum(cfg)) {
-        return false;
-    }
-
-    return true;
+    return cfg->checksum == calc_checksum(cfg);
 }
 
 // Write config to flash
@@ -804,5 +801,72 @@ bool settings_set_syslog_port(uint16_t port)
     write_config(&cfg);
 
     printf("Syslog port saved: %u\r\n", port);
+    return true;
+}
+
+//--------------------------------------------------------------------+
+// Device Password
+//--------------------------------------------------------------------+
+
+bool settings_device_has_password(void)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        return false;
+    }
+
+    return (cfg.settings_flags & SETTINGS_FLAG_DEVICE_PASS) && cfg.device_password[0] != '\0';
+}
+
+bool settings_get_device_password(char *password)
+{
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        password[0] = '\0';
+        return false;
+    }
+
+    if (!(cfg.settings_flags & SETTINGS_FLAG_DEVICE_PASS) || cfg.device_password[0] == '\0') {
+        password[0] = '\0';
+        return false;
+    }
+
+    strncpy(password, cfg.device_password, DEVICE_PASSWORD_MAX_LEN);
+    password[DEVICE_PASSWORD_MAX_LEN] = '\0';
+    return true;
+}
+
+bool settings_set_device_password(const char *password)
+{
+    if (password == NULL) {
+        return false;
+    }
+
+    size_t len = strlen(password);
+    if (len > DEVICE_PASSWORD_MAX_LEN) {
+        printf("Device password too long: %zu\r\n", len);
+        return false;
+    }
+
+    flash_config_t cfg;
+
+    if (!read_config(&cfg)) {
+        init_fresh_config(&cfg);
+    }
+
+    memset(cfg.device_password, 0, sizeof(cfg.device_password));
+    if (len > 0) {
+        strncpy(cfg.device_password, password, DEVICE_PASSWORD_MAX_LEN);
+        cfg.settings_flags |= SETTINGS_FLAG_DEVICE_PASS;
+    } else {
+        cfg.settings_flags &= ~SETTINGS_FLAG_DEVICE_PASS;
+    }
+
+    cfg.checksum = calc_checksum(&cfg);
+    write_config(&cfg);
+
+    printf("Device password %s\r\n", len > 0 ? "saved" : "cleared");
     return true;
 }

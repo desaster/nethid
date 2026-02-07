@@ -36,6 +36,7 @@ add_executable(${TARGET}
     src/httpd/httpd_websocket.c
     src/mqtt/mqtt.c
     src/settings.c
+    src/auth.c
     src/syslog.c
     src/ap_mode.c
     src/dhcpserver.c
@@ -46,6 +47,7 @@ add_executable(${TARGET}
 target_link_libraries(${TARGET}
     pico_cyw43_arch_lwip_poll
     pico_lwip_mqtt
+    pico_rand
     pico_stdlib
     pico_multicore
     hardware_flash

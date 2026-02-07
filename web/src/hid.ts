@@ -134,7 +134,11 @@ export class HIDClient {
         this.setState('connecting');
 
         // WebSocket upgrade on the same HTTP port
-        const wsUrl = `ws://${location.hostname}/ws`;
+        let wsUrl = `ws://${location.hostname}/ws`;
+        const token = sessionStorage.getItem('nethid-auth-token');
+        if (token) {
+            wsUrl += `?token=${encodeURIComponent(token)}`;
+        }
         this.ws = new WebSocket(wsUrl);
         this.ws.binaryType = 'arraybuffer';
 

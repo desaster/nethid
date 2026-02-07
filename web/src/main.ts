@@ -4,6 +4,36 @@ import type { ConnectionState, USBStatus } from "./hid";
 import { KeyboardManager } from "./keyboard";
 import { getDesktopLayouts, MOBILE_LAYOUTS, type LayoutPreset } from "./keyboard-layouts";
 
+// Auth state
+const AUTH_TOKEN_KEY = 'nethid-auth-token';
+let authRequired = false;
+
+async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    const token = sessionStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) {
+        const headers = new Headers(options.headers);
+        headers.set('Authorization', `Bearer ${token}`);
+        options.headers = headers;
+    }
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+    return response;
+}
+
+async function checkAuthRequired(): Promise<boolean> {
+    try {
+        const response = await fetch('/api/auth/status');
+        if (!response.ok) return false;
+        const data = await response.json();
+        authRequired = data.required;
+        return data.required;
+    } catch {
+        return false;
+    }
+}
+
 // Hash-based routing
 function navigateTo(hash: string): void {
     cleanupControl();
@@ -130,7 +160,7 @@ let pollInterval: number | null = null;
 
 async function fetchStatus(): Promise<DeviceStatus | null> {
     try {
-        const response = await fetch("/api/status");
+        const response = await apiFetch("/api/status");
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -143,7 +173,7 @@ async function fetchStatus(): Promise<DeviceStatus | null> {
 
 async function fetchNetworks(): Promise<NetworksResponse | null> {
     try {
-        const response = await fetch("/api/networks");
+        const response = await apiFetch("/api/networks");
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -156,7 +186,7 @@ async function fetchNetworks(): Promise<NetworksResponse | null> {
 
 async function triggerScan(): Promise<boolean> {
     try {
-        const response = await fetch("/api/scan", { method: "POST" });
+        const response = await apiFetch("/api/scan", { method: "POST" });
         return response.ok;
     } catch (error) {
         console.error("Failed to trigger scan:", error);
@@ -166,7 +196,7 @@ async function triggerScan(): Promise<boolean> {
 
 async function saveCredentials(ssid: string, password: string): Promise<{ success: boolean; message?: string }> {
     try {
-        const response = await fetch("/api/config", {
+        const response = await apiFetch("/api/config", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ssid, password })
@@ -181,7 +211,7 @@ async function saveCredentials(ssid: string, password: string): Promise<{ succes
 
 async function fetchSettings(): Promise<SettingsResponse | null> {
     try {
-        const response = await fetch("/api/settings");
+        const response = await apiFetch("/api/settings");
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
@@ -194,7 +224,7 @@ async function fetchSettings(): Promise<SettingsResponse | null> {
 
 async function saveSettings(settings: { hostname?: string } & MqttSettings & SyslogSettings): Promise<{ success: boolean; error?: string }> {
     try {
-        const response = await fetch("/api/settings", {
+        const response = await apiFetch("/api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(settings)
@@ -215,7 +245,7 @@ function isValidHostname(hostname: string): boolean {
 
 async function rebootDevice(): Promise<boolean> {
     try {
-        const response = await fetch("/api/reboot", { method: "POST" });
+        const response = await apiFetch("/api/reboot", { method: "POST" });
         return response.ok;
     } catch (error) {
         console.error("Failed to reboot:", error);
@@ -252,6 +282,65 @@ function renderSignalBars(rssi: number): string {
     return `<div class="signal-bars">
         ${[0, 1, 2, 3].map(i => `<div class="bar ${i < bars ? "active" : ""}"></div>`).join("")}
     </div>`;
+}
+
+function renderLoginPage(): void {
+    cleanupControl();
+    stopPolling();
+
+    const app = document.querySelector<HTMLDivElement>("#app")!;
+    app.innerHTML = `
+        <div class="container">
+            <h1>NetHID</h1>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-password">Device Password</label>
+                    <input type="password" id="login-password"
+                           placeholder="Enter password" autofocus>
+                </div>
+                <div id="login-message" class="status-message"></div>
+                <button type="submit" class="btn-primary" style="width: 100%;">Login</button>
+            </form>
+        </div>
+    `;
+
+    document.getElementById("login-form")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const passwordInput = document.getElementById("login-password") as HTMLInputElement;
+        const messageEl = document.getElementById("login-message")!;
+        const password = passwordInput.value;
+
+        if (!password) {
+            messageEl.textContent = "Please enter a password";
+            messageEl.className = "status-message status-error";
+            return;
+        }
+
+        messageEl.textContent = "Logging in...";
+        messageEl.className = "status-message status-info";
+
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                sessionStorage.setItem(AUTH_TOKEN_KEY, data.token);
+                init();
+            } else {
+                messageEl.textContent = "Invalid password";
+                messageEl.className = "status-message status-error";
+                passwordInput.value = "";
+                passwordInput.focus();
+            }
+        } catch {
+            messageEl.textContent = "Connection error";
+            messageEl.className = "status-message status-error";
+        }
+    });
 }
 
 function renderStatusPage(status: DeviceStatus): void {
@@ -631,6 +720,25 @@ async function renderSettingsPage(): Promise<void> {
                 <button type="submit" id="save-btn" class="btn-primary">Save Settings</button>
             </form>
 
+            <div class="settings-section">
+                <h2>Device Password</h2>
+                ${!authRequired ? '<p class="form-hint">No password set. Set a password to require authentication.</p>' : ''}
+                <div class="form-group">
+                    <label for="new-password">${authRequired ? 'New Password' : 'Password'}</label>
+                    <input type="password" id="new-password" maxlength="64"
+                           placeholder="Enter ${authRequired ? 'new ' : ''}password">
+                </div>
+                ${authRequired ? `
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button type="button" id="save-password-btn" class="btn-primary">Change Password</button>
+                        <button type="button" id="remove-password-btn" class="btn-secondary btn-danger">Remove Password</button>
+                    </div>
+                ` : `
+                    <button type="button" id="save-password-btn" class="btn-primary">Set Password</button>
+                `}
+                <div id="password-message" class="status-message"></div>
+            </div>
+
             <div class="settings-actions">
                 <button id="back-btn" class="btn-secondary">Back to Status</button>
                 <button id="reboot-btn" class="btn-secondary btn-danger" style="margin-top: 0.5rem;">Reboot Device</button>
@@ -749,6 +857,68 @@ async function renderSettingsPage(): Promise<void> {
             hintEl.classList.add("hint-error");
         } else {
             hintEl.classList.remove("hint-error");
+        }
+    });
+
+    // Password management
+    document.getElementById("save-password-btn")?.addEventListener("click", async () => {
+        const input = document.getElementById("new-password") as HTMLInputElement;
+        const msg = document.getElementById("password-message")!;
+        if (!input.value) {
+            msg.textContent = "Please enter a password";
+            msg.className = "status-message status-error";
+            return;
+        }
+        msg.textContent = "Saving...";
+        msg.className = "status-message status-info";
+        try {
+            const response = await apiFetch('/api/password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new: input.value })
+            });
+            const data = await response.json();
+            if (response.ok && data.token) {
+                sessionStorage.setItem(AUTH_TOKEN_KEY, data.token);
+                authRequired = true;
+                msg.textContent = "Password saved!";
+                msg.className = "status-message status-success";
+                setTimeout(() => renderSettingsPage(), 1000);
+            } else {
+                msg.textContent = data.error || "Failed";
+                msg.className = "status-message status-error";
+            }
+        } catch {
+            msg.textContent = "Connection error";
+            msg.className = "status-message status-error";
+        }
+    });
+
+    document.getElementById("remove-password-btn")?.addEventListener("click", async () => {
+        if (!confirm("Remove device password? Authentication will be disabled.")) return;
+        const msg = document.getElementById("password-message")!;
+        msg.textContent = "Saving...";
+        msg.className = "status-message status-info";
+        try {
+            const response = await apiFetch('/api/password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new: "" })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                sessionStorage.removeItem(AUTH_TOKEN_KEY);
+                authRequired = false;
+                msg.textContent = "Password removed.";
+                msg.className = "status-message status-success";
+                setTimeout(() => renderSettingsPage(), 1000);
+            } else {
+                msg.textContent = data.error || "Failed";
+                msg.className = "status-message status-error";
+            }
+        } catch {
+            msg.textContent = "Connection error";
+            msg.className = "status-message status-error";
         }
     });
 }
@@ -923,7 +1093,19 @@ async function init(): Promise<void> {
         </div>
     `;
 
+    await checkAuthRequired();
+    if (authRequired && !sessionStorage.getItem(AUTH_TOKEN_KEY)) {
+        renderLoginPage();
+        return;
+    }
+
     const status = await fetchStatus();
+
+    // Token was stale (cleared by apiFetch on 401)
+    if (!status && authRequired && !sessionStorage.getItem(AUTH_TOKEN_KEY)) {
+        renderLoginPage();
+        return;
+    }
 
     // If in AP mode, also fetch networks
     if (status?.mode === "ap") {

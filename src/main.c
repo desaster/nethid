@@ -38,6 +38,7 @@
 #include "httpd/httpd_server.h"
 #include "mqtt/mqtt.h"
 #include "settings.h"
+#include "auth.h"
 #include "syslog.h"
 #include "ap_mode.h"
 #include "wifi_scan.h"
@@ -69,8 +70,15 @@ static char current_wifi_password[WIFI_PASSWORD_MAX_LEN + 1];
 // header determines the second part of the packet
 typedef struct {
     uint8_t type;
-    uint8_t version; // 1
+    uint8_t version; // 1 or 2
 } packet_header;
+
+// v2 header includes auth token
+typedef struct {
+    uint8_t type;
+    uint8_t version; // 2
+    uint8_t token[16];
+} packet_header_v2;
 
 // second part is either keyboard..
 typedef struct {
@@ -127,6 +135,9 @@ int main()
         printf("Failed to initialize cyw43\r\n");
         return 1;
     }
+
+    // Initialize auth (generates session token if password is set)
+    auth_init();
 
     // Check if we should start in AP mode
     bool start_ap_mode = false;
@@ -259,6 +270,42 @@ int setup_wifi(uint32_t country, const char *ssid, const char *pass, uint32_t au
     return 0;
 }
 
+static void udp_process_hid(uint8_t type, void *payload, uint16_t len)
+{
+    if (type == PACKET_TYPE_KEYBOARD) {
+        if (len != sizeof(packet_keyboard)) {
+            printf("Keyboard packet wrong size (%d)\r\n", len);
+            return;
+        }
+        packet_keyboard *kbd = (packet_keyboard *)payload;
+        if (kbd->pressed) {
+            press_key(kbd->key);
+        } else {
+            depress_key(kbd->key);
+        }
+    } else if (type == PACKET_TYPE_MOUSE) {
+        if (len != sizeof(packet_mouse)) {
+            printf("Mouse packet wrong size (%d)\r\n", len);
+            return;
+        }
+        packet_mouse *mou = (packet_mouse *)payload;
+        move_mouse(mou->buttons, mou->x, mou->y, mou->vertical, mou->horizontal);
+    } else if (type == PACKET_TYPE_CONSUMER) {
+        if (len != sizeof(packet_consumer)) {
+            printf("Consumer packet wrong size (%d)\r\n", len);
+            return;
+        }
+        packet_consumer *con = (packet_consumer *)payload;
+        if (con->pressed) {
+            press_consumer(con->code);
+        } else {
+            release_consumer();
+        }
+    } else {
+        printf("Unknown packet type: %d\r\n", type);
+    }
+}
+
 static void udp_receive(
     void *arg,
     struct udp_pcb *pcb,
@@ -266,11 +313,6 @@ static void udp_receive(
     const struct ip4_addr *addr,
     unsigned short port)
 {
-    packet_header *hdr;
-    packet_keyboard *kbd;
-    packet_mouse *mou;
-    packet_consumer *con;
-
     if (p == NULL) {
         return;
     }
@@ -281,50 +323,36 @@ static void udp_receive(
         return;
     }
 
-    hdr = (packet_header *) p->payload;
+    packet_header *hdr = (packet_header *)p->payload;
 
-    if (hdr->version != 1) {
-        printf("Unknown packet version\r\n");
-        pbuf_free(p);
-        return;
-    }
+    if (hdr->version == 1) {
+        // v1: no auth field, reject if auth is enabled
+        if (auth_is_enabled()) {
+            pbuf_free(p);
+            return;
+        }
+        uint16_t body_len = p->len - sizeof(packet_header);
+        void *body = p->payload + sizeof(packet_header);
+        udp_process_hid(hdr->type, body, body_len);
 
-    if (hdr->type == PACKET_TYPE_KEYBOARD) {
-        if (p->len != sizeof(packet_header) + sizeof(packet_keyboard)) {
-            printf("Keyboard packet too short (%d)\r\n", p->len);
+    } else if (hdr->version == 2) {
+        // v2: 16-byte raw token after header
+        if (p->len < sizeof(packet_header_v2)) {
+            printf("v2 packet too short\r\n");
             pbuf_free(p);
             return;
         }
-        kbd = (packet_keyboard *) (p->payload + sizeof(packet_header));
-        if (kbd->pressed) {
-            press_key(kbd->key);
-        } else {
-            depress_key(kbd->key);
-        }
-    } else if (hdr->type == PACKET_TYPE_MOUSE) {
-        if (p->len != sizeof(packet_header) + sizeof(packet_mouse)) {
-            printf("Mouse packet too short (%d)\r\n", p->len);
+        packet_header_v2 *hdr2 = (packet_header_v2 *)p->payload;
+        if (auth_is_enabled() && !auth_validate_token_raw(hdr2->token)) {
             pbuf_free(p);
             return;
         }
-        mou = (packet_mouse *) (p->payload + sizeof(packet_header));
-        move_mouse(mou->buttons, mou->x, mou->y, mou->vertical, mou->horizontal);
-    } else if (hdr->type == PACKET_TYPE_CONSUMER) {
-        if (p->len != sizeof(packet_header) + sizeof(packet_consumer)) {
-            printf("Consumer packet too short (%d)\r\n", p->len);
-            pbuf_free(p);
-            return;
-        }
-        con = (packet_consumer *) (p->payload + sizeof(packet_header));
-        if (con->pressed) {
-            press_consumer(con->code);
-        } else {
-            release_consumer();
-        }
+        uint16_t body_len = p->len - sizeof(packet_header_v2);
+        void *body = p->payload + sizeof(packet_header_v2);
+        udp_process_hid(hdr2->type, body, body_len);
+
     } else {
-        printf("Unknown packet type: %d\r\n", hdr->type);
-        pbuf_free(p);
-        return;
+        printf("Unknown packet version: %d\r\n", hdr->version);
     }
 
     pbuf_free(p);

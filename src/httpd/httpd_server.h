@@ -101,6 +101,7 @@ typedef struct {
     uint8_t method;
     const char *uri;
     bool prefix_match;
+    bool no_auth;
     http_handler_fn handler;
 } http_route_t;
 

@@ -48,6 +48,9 @@
 #define SYSLOG_SERVER_MAX_LEN 63  // Hostname or IPv4 address
 #define SYSLOG_DEFAULT_PORT 514
 
+// Device password
+#define DEVICE_PASSWORD_MAX_LEN 64
+
 // Settings flags bitfield
 #define SETTINGS_FLAG_HOSTNAME       (1 << 0)
 #define SETTINGS_FLAG_MQTT_BROKER    (1 << 1)
@@ -59,6 +62,7 @@
 #define SETTINGS_FLAG_MQTT_CLIENT_ID (1 << 7)
 #define SETTINGS_FLAG_SYSLOG_SERVER  (1 << 8)
 #define SETTINGS_FLAG_SYSLOG_PORT    (1 << 9)
+#define SETTINGS_FLAG_DEVICE_PASS   (1 << 10)
 
 //--------------------------------------------------------------------+
 // Force AP Mode Flag
@@ -185,5 +189,20 @@ uint16_t settings_get_syslog_port(void);
 
 // Set syslog port
 bool settings_set_syslog_port(uint16_t port);
+
+//--------------------------------------------------------------------+
+// Device Password
+//--------------------------------------------------------------------+
+
+// Get device password
+// password buffer must be at least DEVICE_PASSWORD_MAX_LEN+1 bytes
+// Returns true if a password is set, false if not
+bool settings_get_device_password(char *password);
+
+// Set device password (empty string to clear)
+bool settings_set_device_password(const char *password);
+
+// Check if device password is configured
+bool settings_device_has_password(void);
 
 #endif

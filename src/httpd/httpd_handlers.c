@@ -21,6 +21,7 @@
 #include "wifi_scan.h"
 #include "usb.h"
 #include "hid_keys.h"
+#include "auth.h"
 #include "cjson/cJSON.h"
 
 //
@@ -383,6 +384,91 @@ static void handle_api_settings_post(connection_t *conn)
 }
 
 //
+// Auth API Handlers
+//
+
+static void handle_api_auth_status(connection_t *conn)
+{
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "required", auth_is_enabled());
+    http_send_cjson(conn, 200, json);
+}
+
+static void handle_api_login(connection_t *conn)
+{
+    if (!auth_is_enabled()) {
+        http_send_error(conn, 400, "auth not enabled");
+        return;
+    }
+
+    cJSON *json = cJSON_Parse(conn->req.body);
+    if (json == NULL) {
+        http_send_error(conn, 400, "invalid JSON");
+        return;
+    }
+
+    const char *password = cjson_get_string(json, "password");
+    if (password == NULL) {
+        cJSON_Delete(json);
+        http_send_error(conn, 400, "missing password field");
+        return;
+    }
+
+    if (!auth_validate_password(password)) {
+        cJSON_Delete(json);
+        http_send_error(conn, 401, "invalid password");
+        return;
+    }
+
+    cJSON_Delete(json);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "token", auth_get_token());
+    http_send_cjson(conn, 200, resp);
+}
+
+static void handle_api_password(connection_t *conn)
+{
+    cJSON *json = cJSON_Parse(conn->req.body);
+    if (json == NULL) {
+        http_send_error(conn, 400, "invalid JSON");
+        return;
+    }
+
+    const char *new_pass = cjson_get_string(json, "new");
+    if (new_pass == NULL) {
+        cJSON_Delete(json);
+        http_send_error(conn, 400, "missing new field");
+        return;
+    }
+
+    if (strlen(new_pass) > DEVICE_PASSWORD_MAX_LEN) {
+        cJSON_Delete(json);
+        http_send_error(conn, 400, "password too long");
+        return;
+    }
+
+    if (!settings_set_device_password(new_pass)) {
+        cJSON_Delete(json);
+        http_send_error(conn, 500, "failed to save password");
+        return;
+    }
+
+    auth_regenerate_token();
+    cJSON_Delete(json);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+
+    const char *token = auth_get_token();
+    if (token) {
+        cJSON_AddStringToObject(resp, "token", token);
+    }
+
+    http_send_cjson(conn, 200, resp);
+}
+
+//
 // HID API Handlers
 //
 
@@ -551,20 +637,23 @@ static void handle_api_hid_release(connection_t *conn)
 //
 
 static const http_route_t routes[] = {
-    { HTTP_GET,  "/api/status",            false, handle_api_status },
-    { HTTP_GET,  "/api/config",            false, handle_api_config_get },
-    { HTTP_GET,  "/api/networks",          false, handle_api_networks },
-    { HTTP_GET,  "/api/settings",          false, handle_api_settings_get },
-    { HTTP_POST, "/api/config",            false, handle_api_config_post },
-    { HTTP_POST, "/api/settings",          false, handle_api_settings_post },
-    { HTTP_POST, "/api/scan",              false, handle_api_scan },
-    { HTTP_POST, "/api/reboot",            false, handle_api_reboot },
-    { HTTP_POST, "/api/reboot-ap",         false, handle_api_reboot_ap },
-    { HTTP_POST, "/api/hid/key",           false, handle_api_hid_key },
-    { HTTP_POST, "/api/hid/mouse/move",    false, handle_api_hid_mouse_move },
-    { HTTP_POST, "/api/hid/mouse/button",  false, handle_api_hid_mouse_button },
-    { HTTP_POST, "/api/hid/mouse/scroll",  false, handle_api_hid_mouse_scroll },
-    { HTTP_POST, "/api/hid/release",       false, handle_api_hid_release },
+    { HTTP_GET,  "/api/auth/status",       false, true,  handle_api_auth_status },
+    { HTTP_POST, "/api/login",             false, true,  handle_api_login },
+    { HTTP_POST, "/api/password",          false, false, handle_api_password },
+    { HTTP_GET,  "/api/status",            false, false, handle_api_status },
+    { HTTP_GET,  "/api/config",            false, false, handle_api_config_get },
+    { HTTP_GET,  "/api/networks",          false, false, handle_api_networks },
+    { HTTP_GET,  "/api/settings",          false, false, handle_api_settings_get },
+    { HTTP_POST, "/api/config",            false, false, handle_api_config_post },
+    { HTTP_POST, "/api/settings",          false, false, handle_api_settings_post },
+    { HTTP_POST, "/api/scan",              false, false, handle_api_scan },
+    { HTTP_POST, "/api/reboot",            false, false, handle_api_reboot },
+    { HTTP_POST, "/api/reboot-ap",         false, false, handle_api_reboot_ap },
+    { HTTP_POST, "/api/hid/key",           false, false, handle_api_hid_key },
+    { HTTP_POST, "/api/hid/mouse/move",    false, false, handle_api_hid_mouse_move },
+    { HTTP_POST, "/api/hid/mouse/button",  false, false, handle_api_hid_mouse_button },
+    { HTTP_POST, "/api/hid/mouse/scroll",  false, false, handle_api_hid_mouse_scroll },
+    { HTTP_POST, "/api/hid/release",       false, false, handle_api_hid_release },
 };
 
 const http_route_t *httpd_get_routes(void)

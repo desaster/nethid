@@ -17,6 +17,8 @@
 #include "lwip/pbuf.h"
 #include "lwip/apps/fs.h"
 
+#include "auth.h"
+#include "board.h"
 #include "cjson/cJSON.h"
 
 //
@@ -209,6 +211,46 @@ static void send_file_chunk(connection_t *conn)
 }
 
 //
+// Auth
+//
+
+// Extract "token" value from query string like "token=abc123&foo=bar"
+static const char *query_get_token(const char *query)
+{
+    if (query == NULL) return NULL;
+
+    const char *p = query;
+    while (*p) {
+        if (strncmp(p, "token=", 6) == 0) {
+            return p + 6;
+        }
+        // Skip to next parameter
+        while (*p && *p != '&') p++;
+        if (*p == '&') p++;
+    }
+    return NULL;
+}
+
+// Check if the request carries a valid auth token
+static bool request_is_authenticated(connection_t *conn)
+{
+    // Auth disabled or AP mode — allow everything
+    if (!auth_is_enabled() || in_ap_mode) return true;
+
+    // Check Authorization: Bearer <token> header
+    const char *auth = conn->req.auth_header;
+    if (auth && strncmp(auth, "Bearer ", 7) == 0) {
+        if (auth_validate_token(auth + 7)) return true;
+    }
+
+    // Check ?token=<token> query parameter
+    const char *token = query_get_token(conn->req.query);
+    if (token && auth_validate_token(token)) return true;
+
+    return false;
+}
+
+//
 // Route dispatch
 //
 
@@ -230,12 +272,16 @@ static void dispatch_request(connection_t *conn)
         }
 
         if (match) {
+            if (!r->no_auth && !request_is_authenticated(conn)) {
+                http_send_error(conn, 401, "unauthorized");
+                return;
+            }
             r->handler(conn);
             return;
         }
     }
 
-    // No API route matched
+    // No API route matched — static files don't require auth
     if (conn->req.method == HTTP_GET) {
         serve_static_file(conn, conn->req.uri);
     } else {
@@ -393,8 +439,11 @@ static void parse_request(connection_t *conn)
 
     // WebSocket upgrade check
     if (conn->req.websocket_upgrade && conn->req.ws_key) {
+        if (!request_is_authenticated(conn)) {
+            http_send_error(conn, 401, "unauthorized");
+            return;
+        }
         if (httpd_websocket_upgrade(conn)) {
-            // Connection is now in WebSocket mode
             tcp_nagle_disable(conn->pcb);
         } else {
             http_send_error(conn, 400, "WebSocket handshake failed");
