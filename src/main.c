@@ -419,20 +419,28 @@ void request_reboot(void)
     }
 }
 
+#define WIFI_RECONNECT_INITIAL_MS  5000
+#define WIFI_RECONNECT_MAX_MS     300000
+
 // poll for wifi status
 void wifi_task(void)
 {
     static int prev_result = -1;
+    static uint32_t last_reconnect_ms = 0;
+    static uint32_t reconnect_delay_ms = WIFI_RECONNECT_INITIAL_MS;
+
     int result = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
     wifi_up = false;
+
     switch (result) {
         case CYW43_LINK_DOWN:
             if (prev_result != result) {
                 printf("CYW43_LINK_DOWN\r\n");
-                // Only reconnect if we were previously connected (not on initial boot)
                 if (prev_result == CYW43_LINK_UP) {
                     printf("Attempting to reconnect...\r\n");
                     cyw43_arch_wifi_connect_async(current_wifi_ssid, current_wifi_password, CYW43_AUTH_WPA2_MIXED_PSK);
+                    last_reconnect_ms = board_millis();
+                    reconnect_delay_ms = WIFI_RECONNECT_INITIAL_MS;
                 }
             }
             break;
@@ -452,26 +460,26 @@ void wifi_task(void)
                 printf("CYW43_LINK_UP\r\n");
                 update_blink_state();
                 setup_server();
+                reconnect_delay_ms = WIFI_RECONNECT_INITIAL_MS;
             }
             break;
         case CYW43_LINK_FAIL:
-            if (prev_result != result) {
-                printf("CYW43_LINK_FAIL\r\n");
-                // Attempt to reconnect on failure (but not if this is the initial attempt)
-                if (prev_result >= 0) {
-                    printf("Attempting to reconnect...\r\n");
-                    cyw43_arch_wifi_connect_async(current_wifi_ssid, current_wifi_password, CYW43_AUTH_WPA2_MIXED_PSK);
-                }
-            }
-            break;
         case CYW43_LINK_NONET:
-            if (prev_result != result) {
-                printf("CYW43_LINK_NONET\r\n");
-            }
-            break;
         case CYW43_LINK_BADAUTH:
             if (prev_result != result) {
-                printf("CYW43_LINK_BADAUTH\r\n");
+                printf("CYW43_LINK_%s\r\n",
+                    result == CYW43_LINK_FAIL ? "FAIL" :
+                    result == CYW43_LINK_NONET ? "NONET" : "BADAUTH");
+            }
+            if (board_millis() - last_reconnect_ms >= reconnect_delay_ms) {
+                printf("Reconnecting (next retry in %lus)...\r\n",
+                    (unsigned long)(reconnect_delay_ms * 2 > WIFI_RECONNECT_MAX_MS
+                        ? WIFI_RECONNECT_MAX_MS : reconnect_delay_ms * 2) / 1000);
+                cyw43_arch_wifi_connect_async(current_wifi_ssid, current_wifi_password, CYW43_AUTH_WPA2_MIXED_PSK);
+                last_reconnect_ms = board_millis();
+                if (reconnect_delay_ms < WIFI_RECONNECT_MAX_MS) {
+                    reconnect_delay_ms *= 2;
+                }
             }
             break;
     }
